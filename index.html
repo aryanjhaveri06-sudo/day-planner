@@ -1,0 +1,666 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Planner">
+<meta name="theme-color" content="#F5F4F0" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.png">
+<title>Planner</title>
+<script src="https://accounts.google.com/gsi/client" async></script>
+<style>
+:root{
+  --bg:#F5F4F0;--surface:#FFFFFF;--surface2:#EFEEE9;--ink:#1C1C1E;--ink2:#6C6C70;--ink3:#AEAEB2;--line:rgba(60,60,67,.12);
+  --accent:#5E5CE6;--ok:#34C759;--bad:#FF3B30;--shadow:0 1px 2px rgba(0,0,0,.04),0 8px 24px rgba(0,0,0,.06);
+  --r:18px;--tabh:64px;--safeb:env(safe-area-inset-bottom,0px);--safet:env(safe-area-inset-top,0px);
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#000;--surface:#1C1C1E;--surface2:#2C2C2E;--ink:#F2F2F7;--ink2:#98989F;--ink3:#636366;--line:rgba(84,84,88,.45);
+  --accent:#7D7AFF;--shadow:none}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink)}
+body{font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+h1,h2,h3,.rounded{font-family:ui-rounded,"SF Pro Rounded",-apple-system,system-ui,sans-serif}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
+button:disabled{opacity:.55;cursor:progress}
+[hidden]{display:none!important}
+a{color:var(--accent);text-decoration:none}
+input,textarea{font:inherit;color:var(--ink);background:transparent;border:0;outline:0;width:100%}
+textarea{resize:vertical}
+
+/* ---------- shell ---------- */
+.nav{position:fixed;z-index:20;display:flex;background:color-mix(in srgb,var(--surface) 82%,transparent);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px)}
+.nav .brand{display:none}
+.nav button{display:flex;flex-direction:column;align-items:center;gap:2px;color:var(--ink3);font-size:10.5px;font-weight:500}
+.nav button svg{width:26px;height:26px}
+.nav button.on{color:var(--accent)}
+main{padding:calc(var(--safet) + 8px) 16px calc(var(--tabh) + var(--safeb) + 96px)}
+section{display:none;max-width:1180px;margin:0 auto}section.on{display:block}
+@media (max-width:759px){
+  .nav{left:0;right:0;bottom:0;height:calc(var(--tabh) + var(--safeb));padding:8px 0 var(--safeb);border-top:.5px solid var(--line);justify-content:space-around}
+  .nav button{flex:1}
+}
+@media (min-width:760px){
+  .nav{top:0;bottom:0;left:0;width:210px;flex-direction:column;gap:2px;padding:calc(var(--safet) + 22px) 12px;border-right:.5px solid var(--line)}
+  .nav .brand{display:block;font:700 20px ui-rounded,-apple-system,sans-serif;padding:0 10px 18px}
+  .nav button{flex-direction:row;gap:10px;font-size:15px;padding:9px 10px;border-radius:10px;color:var(--ink2)}
+  .nav button svg{width:20px;height:20px}
+  .nav button.on{background:var(--surface2);color:var(--ink)}
+  .nav button.on svg{color:var(--accent)}
+  main{margin-left:210px;padding:28px 32px 120px}
+}
+
+/* ---------- today ---------- */
+.todaygrid{display:grid;gap:20px}
+@media (min-width:1100px){.todaygrid{grid-template-columns:minmax(0,1fr) 320px;align-items:start}.rail{position:sticky;top:28px}}
+.dayhead{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin:6px 0 14px}
+.eyebrow{color:var(--accent);font-weight:600;font-size:14px;letter-spacing:.01em}
+.dayhead h1{margin:0;font-size:32px;line-height:1.1;font-weight:700;position:relative;white-space:nowrap}
+.dayhead h1 input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.chips{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;background:var(--surface);box-shadow:var(--shadow);font-size:13.5px;font-weight:600;white-space:nowrap}
+.chip .dot{width:7px;height:7px;border-radius:50%;background:var(--ink3)}
+.chip.live .dot{background:var(--ok)}
+
+.week{display:flex;align-items:center;gap:4px;background:var(--surface);border-radius:var(--r);padding:8px;box-shadow:var(--shadow);margin-bottom:16px}
+.week .arr{width:28px;height:44px;color:var(--ink3);font-size:20px}
+.week .days{flex:1;display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+.wd{display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;border-radius:12px;font-size:11.5px;color:var(--ink2);font-weight:500}
+.wd b{font-size:17px;color:var(--ink);font-weight:600;width:34px;height:34px;display:grid;place-items:center;border-radius:50%}
+.wd.today b{color:var(--accent)}
+.wd.sel b{background:var(--ink);color:var(--bg)}
+.wd i{width:5px;height:5px;border-radius:50%;background:transparent}
+.wd.has i{background:var(--accent)}
+
+.note{color:var(--ink2);font-size:14.5px;margin:0 4px 12px}
+.banner{display:inline-block;background:var(--surface2);border-radius:8px;padding:4px 10px;font-size:13px;color:var(--ink2);margin:0 4px 12px}
+
+/* timeline: time | pill | info | check */
+.tl{list-style:none;margin:0;padding:0;position:relative}
+.tl::before{content:"";position:absolute;left:79px;top:20px;bottom:20px;border-left:2px dotted var(--ink3);opacity:.6}
+.ev,.gap{display:grid;grid-template-columns:52px 56px minmax(0,1fr) 36px;column-gap:12px;align-items:start;position:relative}
+.ev{padding:4px 0;cursor:pointer}
+.ev .t{font-size:13px;color:var(--ink2);text-align:right;padding-top:12px;font-variant-numeric:tabular-nums;font-weight:500}
+.pill{width:44px;margin-left:6px;border-radius:22px;display:flex;justify-content:center;padding-top:10px;font-size:20px;background:var(--c);box-shadow:0 0 0 4px var(--bg);transition:transform .15s}
+.ev:active .pill{transform:scale(.96)}
+.ev .info{padding:10px 0 8px;min-width:0}
+.meta{font-size:13px;color:var(--ink2);font-variant-numeric:tabular-nums}
+.ttl{font-size:16.5px;font-weight:600;margin-top:1px;overflow-wrap:anywhere}
+.sub{font-size:14px;color:var(--ink2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.chk{width:26px;height:26px;margin-top:11px;border-radius:50%;border:2px solid var(--c);display:grid;place-items:center;color:#fff;font-size:14px;font-weight:700}
+.ev.done .chk{background:var(--c)}
+.ev.done .ttl{color:var(--ink2);text-decoration:line-through;text-decoration-color:var(--ink3)}
+.ev.fixed .pill{background:var(--surface2)}
+.ev.fixed .ttl{font-weight:500}
+.ev.overlay .pill{width:30px;margin-left:13px;font-size:15px;padding-top:6px;border-radius:15px}
+.ev.overlay .info{padding-top:6px}
+.ev.now .pill{box-shadow:0 0 0 4px var(--bg),0 0 0 6px var(--c)}
+.ev.now .t{color:var(--accent);font-weight:700}
+.gap{padding:6px 0;align-items:center}
+.gap .info{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:14px;color:var(--ink3)}
+.gap .fill{color:var(--accent);font-weight:600;font-size:13.5px;padding:5px 11px;border-radius:999px;background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.thinking{display:flex;align-items:center;gap:12px;padding:16px;border-radius:var(--r);background:var(--surface);box-shadow:var(--shadow);margin-bottom:14px;color:var(--ink2)}
+.dots span{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);margin-right:4px;animation:b 1.2s infinite}
+.dots span:nth-child(2){animation-delay:.15s}.dots span:nth-child(3){animation-delay:.3s}
+@keyframes b{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-4px)}}
+.empty{text-align:center;padding:28px 16px 8px;color:var(--ink2)}
+.empty h3{color:var(--ink);font-size:19px;margin:6px 0}
+
+/* cards */
+.card{background:var(--surface);border-radius:var(--r);padding:16px;box-shadow:var(--shadow);margin-bottom:14px}
+.card h3{margin:0 0 10px;font-size:15px;font-weight:600;color:var(--ink2);display:flex;align-items:center;gap:6px}
+.pod{background:linear-gradient(145deg,color-mix(in srgb,#AF52DE 16%,var(--surface)),var(--surface) 70%)}
+.pod .ep{font-size:17px;font-weight:650;line-height:1.3}
+.pod .show{color:var(--ink2);font-size:14px;margin-top:3px}
+.pod .why{font-size:14px;margin-top:8px}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:9px 14px;border-radius:12px;background:var(--surface2);font-weight:600;font-size:14.5px}
+.btn.pri{background:var(--accent);color:#fff}
+.btn.sm{padding:7px 11px;font-size:13.5px}
+.opt{display:block;width:100%;text-align:left;padding:11px 12px;border-radius:12px;background:var(--surface2);margin-top:8px;font-size:14.5px}
+.opt small{display:block;color:var(--ink2);font-size:13px;margin-top:2px}
+.ring{display:flex;align-items:center;gap:16px}
+.ring svg{width:68px;height:68px;transform:rotate(-90deg)}
+.ring b{font-size:22px;display:block}
+.ring span{color:var(--ink2);font-size:13.5px}
+
+/* floating plan button */
+.fab{position:fixed;z-index:15;right:16px;bottom:calc(var(--tabh) + var(--safeb) + 16px);display:flex;align-items:center;gap:8px;padding:15px 22px;border-radius:999px;background:var(--accent);color:#fff;font-weight:650;font-size:16px;box-shadow:0 8px 24px color-mix(in srgb,var(--accent) 45%,transparent)}
+@media (min-width:760px){.fab{bottom:28px;right:32px}}
+.fab[hidden]{display:none}
+
+/* sheet */
+dialog{border:0;padding:0;background:var(--surface);color:var(--ink);width:min(560px,100%);max-height:88vh;border-radius:24px;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+dialog::backdrop{background:rgba(0,0,0,.35)}
+@media (max-width:759px){dialog{margin:auto 0 0;max-width:100%;border-radius:24px 24px 0 0;padding-bottom:var(--safeb)}}
+.sh-head{padding:22px 20px 14px;display:flex;gap:14px;align-items:center;background:linear-gradient(180deg,color-mix(in srgb,var(--c) 22%,var(--surface)),var(--surface))}
+.sh-head .pill{height:56px;margin:0;padding-top:0;align-items:center;box-shadow:none}
+.sh-head h2{margin:0;font-size:21px}
+.sh-body{padding:4px 20px 22px}
+.sh-body p{margin:8px 0}
+.res{display:block;padding:12px 14px;border-radius:14px;background:var(--surface2);margin:12px 0;color:var(--ink)}
+.res b{display:block}.res small{color:var(--ink2)}
+.grab{width:36px;height:5px;border-radius:3px;background:var(--ink3);margin:8px auto 0;opacity:.5}
+@media (min-width:760px){.grab{display:none}}
+
+/* quiz */
+.srcs{display:grid;gap:8px}
+@media (min-width:760px){.srcs{grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}}
+.src{display:flex;gap:12px;align-items:center;text-align:left;padding:12px;border-radius:14px;background:var(--surface);box-shadow:var(--shadow)}
+.src .pill{height:44px;margin:0;padding:0;align-items:center;box-shadow:none;flex:none}
+.src small{display:block;color:var(--ink2);font-size:13px}
+.qcard .ch{display:block;width:100%;text-align:left;padding:13px 14px;border-radius:14px;background:var(--surface2);margin-top:8px;font-size:15px;border:2px solid transparent}
+.qcard .ch.right{border-color:var(--ok);background:color-mix(in srgb,var(--ok) 14%,var(--surface))}
+.qcard .ch.wrong{border-color:var(--bad);background:color-mix(in srgb,var(--bad) 12%,var(--surface))}
+.qcard .why{font-size:14px;color:var(--ink2);margin-top:10px}
+.qnum{font-size:13px;color:var(--accent);font-weight:600}
+.qcard h4{font-size:17px;margin:4px 0 4px;font-weight:600}
+.score{text-align:center}.score b{font-size:44px;display:block;font-family:ui-rounded,-apple-system,sans-serif}
+
+/* journal + settings */
+.pagehead{margin:6px 4px 16px}.pagehead h1{margin:0;font-size:32px}.pagehead p{margin:4px 0 0;color:var(--ink2)}
+.jarea{min-height:42vh;font-size:17px;line-height:1.55}
+.group{background:var(--surface);border-radius:var(--r);box-shadow:var(--shadow);margin-bottom:22px;overflow:hidden}
+.glabel{font-size:13px;color:var(--ink2);text-transform:uppercase;letter-spacing:.04em;margin:0 16px 7px}
+.field{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:.5px solid var(--line)}
+.field:last-child{border-bottom:0}
+.field label{flex:none;width:130px;font-size:15px}
+.field input{text-align:right;color:var(--ink2)}
+.field.col{flex-direction:column;align-items:stretch;gap:4px}
+.field.col label{width:auto;font-size:13px;color:var(--ink2)}
+.field.col textarea{min-height:64px;font-size:15px}
+.gfoot{font-size:13px;color:var(--ink2);margin:-14px 16px 22px}
+details.setup{padding:12px 16px;font-size:14px;color:var(--ink2)}
+details.setup summary{cursor:pointer;color:var(--accent);font-weight:600}
+details.setup li{margin:6px 0}
+.mute{color:var(--ink2);font-size:14px}
+
+/* toast */
+#toast{position:fixed;z-index:50;left:50%;top:calc(var(--safet) + 12px);transform:translate(-50%,-140%);transition:transform .3s;max-width:min(92vw,480px);padding:11px 16px;border-radius:14px;background:var(--ink);color:var(--bg);font-size:14.5px;font-weight:500;box-shadow:0 10px 30px rgba(0,0,0,.2)}
+#toast.show{transform:translate(-50%,0)}
+#toast.err{background:var(--bad);color:#fff}
+</style>
+</head>
+<body>
+
+<nav class="nav" id="nav">
+  <div class="brand">Planner</div>
+  <button data-tab="today" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3.5" y="5" width="17" height="15.5" rx="3.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>Today</button>
+  <button data-tab="quiz"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6-5.3-3-5.3 3 1.2-6L3.4 9.3l6-.7z"/></svg>Quiz</button>
+  <button data-tab="journal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5A1.5 1.5 0 016.5 3H18v18H6.5A1.5 1.5 0 015 19.5z"/><path d="M9 8h5M9 12h5"/></svg>Journal</button>
+  <button data-tab="you"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="8.5" r="4"/><path d="M4.5 20.5c1.3-3.6 4.2-5.5 7.5-5.5s6.2 1.9 7.5 5.5"/></svg>You</button>
+</nav>
+
+<main>
+<section id="today" class="on">
+  <div class="dayhead">
+    <div><div class="eyebrow" id="weekday"></div><h1 class="rounded"><span id="dateLabel"></span><input type="date" id="date" aria-label="Pick date"></h1></div>
+    <div class="chips"><button class="chip" id="gcalBtn"><span class="dot"></span><span>Calendar</span></button><button class="chip" id="pushBtn" hidden>Sync ↑</button></div>
+  </div>
+  <div class="todaygrid">
+    <div>
+      <div class="week"><button class="arr" id="prev" aria-label="Previous week">‹</button><div class="days" id="week"></div><button class="arr" id="next" aria-label="Next week">›</button></div>
+      <div id="allday"></div>
+      <p class="note" id="dayNote"></p>
+      <div id="thinking"></div>
+      <ol class="tl" id="timeline"></ol>
+    </div>
+    <div class="rail">
+      <div class="card pod"><h3>🎧 Commute pick</h3><div id="commute"></div><div id="podOpts"></div></div>
+      <div class="card"><h3>Progress</h3><div id="stats"></div></div>
+    </div>
+  </div>
+</section>
+
+<section id="quiz">
+  <div class="pagehead"><h1 class="rounded">Quiz</h1><p>Questions on exactly what you listened to, watched or read.</p></div>
+  <div id="quizBox"></div>
+  <p class="glabel">Completed</p>
+  <div class="srcs" id="quizSrc"></div>
+  <p class="glabel" style="margin-top:22px">History</p>
+  <div class="group" id="quizHist"></div>
+</section>
+
+<section id="journal">
+  <div class="pagehead"><p class="eyebrow" id="jDate" style="margin:0"></p><h1 class="rounded">Journal <span class="mute" style="font-size:15px">beta</span></h1></div>
+  <div class="card"><textarea class="jarea" id="jText" placeholder="How did today go? What clicked, what drained you, what do you want more of?"></textarea></div>
+  <div class="btnrow" style="margin:0 0 16px"><button class="btn pri" id="jBtn">✨ Reflect with AI</button></div>
+  <div id="jOut"></div>
+</section>
+
+<section id="you">
+  <div class="pagehead"><h1 class="rounded">You</h1><p>The more the planner knows, the better it plans.</p></div>
+  <p class="glabel">Your day</p>
+  <div class="group">
+    <div class="field"><label>Name</label><input id="p_name" placeholder="Optional"></div>
+    <div class="field"><label>Wake up</label><input id="p_wake" type="time"></div>
+    <div class="field"><label>Bedtime</label><input id="p_sleep" type="time"></div>
+    <div class="field"><label>Commute (min)</label><input id="p_commuteMin" type="number" min="0" inputmode="numeric"></div>
+    <div class="field col"><label>Fixed routine, one per line, e.g. “Mon-Fri 08:30-08:50 Commute” or “13:00-13:30 Lunch”</label><textarea id="p_routine" placeholder="Mon-Fri 08:30-08:50 Commute"></textarea></div>
+  </div>
+  <p class="glabel">What you want to grow</p>
+  <div class="group">
+    <div class="field col"><label>Interests &amp; topics</label><textarea id="p_interests" placeholder="e.g. psychology, investing basics, Spanish, design"></textarea></div>
+    <div class="field col"><label>Goals for this season</label><textarea id="p_goals" placeholder="e.g. hold a 10-minute Spanish conversation by March"></textarea></div>
+    <div class="field col"><label>Preferences</label><textarea id="p_prefs" placeholder="e.g. sharpest in the morning, prefer podcasts over video, no screens after 10pm"></textarea></div>
+  </div>
+  <div class="btnrow" style="margin:-8px 0 22px"><button class="btn pri" id="interviewBtn">✨ Let the AI interview me</button></div>
+  <div id="interview"></div>
+  <p class="glabel">What the planner has learned</p>
+  <div class="group"><div class="field col"><textarea id="memory" style="min-height:150px" placeholder="Fills up from 👍/👎, quizzes, interviews and journal reflections."></textarea></div></div>
+  <p class="gfoot">Edit or delete any line. This is everything the AI remembers about you.</p>
+  <p class="glabel">Connections</p>
+  <div class="group">
+    <div class="field"><label>Gemini key</label><input id="s_geminiKey" type="password" autocomplete="off" placeholder="Paste key"></div>
+    <div class="field"><label>Gemini model</label><input id="s_model"></div>
+    <div class="field"><label>Google client ID</label><input id="s_clientId" placeholder="…apps.googleusercontent.com"></div>
+    <details class="setup"><summary>How to set these up</summary><ol>
+      <li>Gemini key: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> → Create key → paste above.</li>
+      <li>Google Calendar: in <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a>, enable the Google Calendar API, create an OAuth client ID (Web application), add <code id="origin"></code> as an Authorized JavaScript origin, add the account as a test user, then paste the client ID above.</li>
+    </ol></details>
+  </div>
+  <div class="btnrow"><button class="btn" id="exportBtn">Export backup</button><label class="btn">Import backup<input type="file" id="importIn" accept=".json" hidden></label></div>
+</section>
+</main>
+
+<button class="fab" id="planBtn">✨ <span>Plan my day</span></button>
+<dialog id="sheet"></dialog>
+<div id="toast"></div>
+
+<script>
+// ---------- state ----------
+const DEF={settings:{geminiKey:'',model:'gemini-2.5-flash',clientId:''},
+  profile:{name:'',commuteMin:20,wake:'07:00',sleep:'23:00',routine:'',interests:'',goals:'',prefs:''},
+  memory:[],plans:{},journal:{},quizzes:[],learned:[],podcasts:{}};
+let S; try{S=JSON.parse(localStorage.getItem('planner'))||{}}catch{S={}}
+for(const k in DEF) S[k]=typeof DEF[k]==='object'&&!Array.isArray(DEF[k])?{...DEF[k],...S[k]}:(S[k]??DEF[k]);
+const save=()=>{try{localStorage.setItem('planner',JSON.stringify(S))}catch(e){toast('Could not save: '+e.message,1)}};
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const safeUrl=u=>/^https?:\/\//i.test(u||'')?u:'';
+const toMin=t=>{const[h,m]=String(t).split(':').map(Number);return h*60+m};
+const fromMin=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+const dur=m=>m<60?`${m}m`:`${Math.floor(m/60)}h${m%60?` ${m%60}m`:''}`;
+const today=()=>new Date().toLocaleDateString('en-CA');
+const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
+let cur=today(),events=[],allDay=[],token=null,tokenClient=null,slotOpts={},sheetIdx=null;
+let toastT; function toast(t,err){const el=$('toast');el.textContent=t;el.className='show'+(err?' err':'');clearTimeout(toastT);toastT=setTimeout(()=>el.className=err?'err':'',err?7000:3500)}
+$('toast').onclick=()=>$('toast').className='';
+const remember=line=>{S.memory.push(`[${today()}] ${line}`);S.memory=S.memory.slice(-200);save();$('memory').value=S.memory.join('\n')};
+
+const TYPES={learn:['📚','#8E8CF0'],podcast:['🎧','#C58AF0'],video:['🎬','#FF8A80'],reading:['📖','#6ACFE0'],practice:['✍️','#5AAEFF'],
+  exercise:['🏃','#5FD583'],meal:['🍽️','#FFB547'],break:['☕️','#C9A982'],rest:['🌙','#7FD8F5'],social:['💬','#FF7A95'],
+  reflect:['🪞','#FFD84D'],chores:['🧺','#B4B4BA']};
+const look=it=>it.src==='gcal'?['📅','#B4B4BA']:it.src==='routine'?[/commut|travel|drive|train|bus/i.test(it.title)?'🚆':'🔁','#B4B4BA']:TYPES[it.type]||['✨','#8E8CF0'];
+
+// ---------- Gemini ----------
+async function gemini(prompt,{search=false}={}){
+  if(!S.settings.geminiKey){showTab('you');throw new Error('Add your Gemini key under You → Connections first.')}
+  const body={contents:[{role:'user',parts:[{text:prompt}]}]};
+  // google_search grounding can't be combined with JSON mode, so search calls parse JSON out of text
+  if(search) body.tools=[{google_search:{}}]; else body.generationConfig={responseMimeType:'application/json'};
+  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(S.settings.model)}:generateContent`,
+    {method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':S.settings.geminiKey},body:JSON.stringify(body)});
+  const d=await r.json();
+  if(!r.ok) throw new Error('Gemini: '+(d.error?.message||r.status));
+  return parseJSON((d.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join(''));
+}
+function parseJSON(t){
+  const fence=t.match(/```(?:json)?\s*([\s\S]*?)```/); if(fence) t=fence[1];
+  const i=t.search(/[{[]/),j=Math.max(t.lastIndexOf('}'),t.lastIndexOf(']'));
+  if(i<0||j<i) throw new Error('The AI returned an unexpected answer. Try again.');
+  return JSON.parse(t.slice(i,j+1));
+}
+function context(){
+  const p=S.profile;
+  return `ABOUT THE USER
+Name: ${p.name||'(not set)'}
+Day runs ${p.wake}–${p.sleep}. One-way commute ≈ ${p.commuteMin} min.
+Interests: ${p.interests||'-'}
+Goals: ${p.goals||'-'}
+Preferences: ${p.prefs||'-'}
+WHAT THE PLANNER HAS LEARNED (oldest→newest, newer wins on conflict):
+${S.memory.slice(-60).join('\n')||'- nothing yet'}
+RECENTLY CONSUMED (don't repeat; build on these):
+${S.learned.slice(-25).map(l=>`- ${l.date}: ${l.title}${l.resource?' — '+l.resource.title:''}`).join('\n')||'- nothing yet'}
+QUIZ RESULTS:
+${S.quizzes.slice(-10).map(q=>`- ${q.title}: ${q.score}/${q.total}`).join('\n')||'- none'}`;
+}
+
+// ---------- Google Calendar ----------
+function connectGcal(){
+  if(!S.settings.clientId){showTab('you');return toast('Add your Google client ID under You → Connections first.',1)}
+  if(!window.google?.accounts) return toast('Google sign-in is still loading. Try again in a second.',1);
+  tokenClient??=google.accounts.oauth2.initTokenClient({client_id:S.settings.clientId,
+    scope:'https://www.googleapis.com/auth/calendar.events',
+    callback:r=>{if(r.error) return toast('Calendar: '+r.error,1);token=r.access_token;loadDay();toast('Google Calendar connected')}});
+  tokenClient.requestAccessToken();
+}
+async function gapi(path,opts={}){
+  const r=await fetch('https://www.googleapis.com/calendar/v3/'+path,{...opts,headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'}});
+  if(r.status===401){token=null;renderChips();throw new Error('Calendar session expired. Tap Calendar to reconnect.')}
+  if(r.status===204) return null;
+  const d=await r.json(); if(!r.ok) throw new Error('Calendar: '+(d.error?.message||r.status)); return d;
+}
+async function fetchEvents(date){
+  const s=new Date(date+'T00:00'),e=new Date(s); e.setDate(e.getDate()+1);
+  const d=await gapi(`calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=100&timeMin=${s.toISOString()}&timeMax=${e.toISOString()}`);
+  allDay=[]; const out=[];
+  for(const ev of d.items||[]){
+    if(ev.extendedProperties?.private?.planner) continue; // our own pushed blocks live in the plan
+    if(ev.start.date){allDay.push(ev.summary);continue}
+    const a=new Date(ev.start.dateTime),b=new Date(ev.end.dateTime);
+    const st=a<s?0:a.getHours()*60+a.getMinutes(),en=b>=e?1440:b.getHours()*60+b.getMinutes();
+    out.push({start:fromMin(st),end:fromMin(Math.min(en,1439)),title:ev.summary||'Busy',src:'gcal'});
+  }
+  return out;
+}
+async function pushPlan(){
+  if(!token) return connectGcal();
+  const plan=S.plans[cur]; if(!plan?.blocks?.length) return toast('Plan the day first.',1);
+  let n=0;
+  for(const b of plan.blocks){
+    if(b.gcalId||b.type==='break') continue;
+    const r=b.resource,desc=[b.detail,r&&`${r.title}${r.creator?' — '+r.creator:''}`,safeUrl(r?.url)].filter(Boolean).join('\n');
+    const ev=await gapi('calendars/primary/events',{method:'POST',body:JSON.stringify({summary:`${look(b)[0]} ${b.title}`,description:desc,
+      start:{dateTime:`${cur}T${b.start}:00`,timeZone:tz},end:{dateTime:`${cur}T${b.end}:00`,timeZone:tz},extendedProperties:{private:{planner:'1'}}})});
+    b.gcalId=ev.id; n++; save();
+  }
+  toast(n?`Added ${n} block${n>1?'s':''} to Google Calendar`:'Calendar is already up to date');
+}
+const dropEvent=b=>token&&b.gcalId?gapi(`calendars/primary/events/${b.gcalId}`,{method:'DELETE'}).catch(()=>{}):null;
+
+// ---------- routine + gaps ----------
+const DAYS=['sun','mon','tue','wed','thu','fri','sat'];
+function routineFor(date){
+  const dow=new Date(date+'T12:00').getDay(),out=[];
+  for(const line of S.profile.routine.split('\n')){
+    const m=line.trim().match(/^(?:([a-z]{3})(?:\s*-\s*([a-z]{3}))?\s+)?(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})\s+(.+)$/i); if(!m) continue;
+    if(m[1]){const a=DAYS.indexOf(m[1].toLowerCase()),b=m[2]?DAYS.indexOf(m[2].toLowerCase()):a; if(a<0||b<0) continue;
+      if(!(a<=b?dow>=a&&dow<=b:dow>=a||dow<=b)) continue}
+    out.push({start:fromMin(toMin(m[3])),end:fromMin(toMin(m[4])),title:m[5],src:'routine'});
+  }
+  return out;
+}
+const fixedItems=()=>[...events,...routineFor(cur)].sort((a,b)=>toMin(a.start)-toMin(b.start));
+function gaps(items){
+  const w=toMin(S.profile.wake),z=toMin(S.profile.sleep),out=[]; let t=w;
+  for(const it of [...items].sort((a,b)=>toMin(a.start)-toMin(b.start))){
+    const a=toMin(it.start),b=toMin(it.end); if(a>t&&t<z) out.push({start:fromMin(t),end:fromMin(Math.min(a,z))}); t=Math.max(t,b);
+  }
+  if(t<z) out.push({start:fromMin(t),end:fromMin(z)}); return out.filter(g=>toMin(g.end)-toMin(g.start)>=5);
+}
+
+// ---------- render: today ----------
+function renderHead(){
+  const d=new Date(cur+'T12:00');
+  $('weekday').textContent=cur===today()?'Today':d.toLocaleDateString(undefined,{weekday:'long'});
+  $('dateLabel').textContent=d.toLocaleDateString(undefined,{day:'numeric',month:'long'});
+  $('date').value=cur;
+  const mon=new Date(d); mon.setDate(d.getDate()-((d.getDay()+6)%7));
+  $('week').innerHTML=[...Array(7)].map((_,k)=>{const x=new Date(mon);x.setDate(mon.getDate()+k);const iso=x.toLocaleDateString('en-CA');
+    return `<button class="wd ${iso===cur?'sel':''} ${iso===today()?'today':''} ${S.plans[iso]?.blocks?.length?'has':''}" data-d="${iso}">${x.toLocaleDateString(undefined,{weekday:'narrow'})}<b>${x.getDate()}</b><i></i></button>`}).join('');
+  renderChips();
+}
+function renderChips(){
+  $('gcalBtn').classList.toggle('live',!!token);
+  $('gcalBtn').lastChild.textContent=token?'Calendar':'Connect';
+  $('pushBtn').hidden=!(token&&S.plans[cur]?.blocks?.length);
+  $('planBtn').querySelector('span').textContent=S.plans[cur]?.blocks?.length?'Re-plan':'Plan my day';
+}
+function renderDay(){
+  renderHead();
+  const plan=S.plans[cur],blocks=plan?.blocks||[],fixed=fixedItems();
+  const solid=[...fixed,...blocks.filter(b=>!b.overlay)];
+  const all=[...fixed.map((f,k)=>({...f,_f:k})),...blocks.map((b,i)=>({...b,_i:i})),...gaps(solid).map(g=>({...g,gap:1}))]
+    .sort((a,b)=>toMin(a.start)-toMin(b.start)||(a.overlay?1:0)-(b.overlay?1:0));
+  const nowM=cur===today()?new Date().getHours()*60+new Date().getMinutes():-1;
+  $('allday').innerHTML=allDay.map(t=>`<span class="banner">📅 ${esc(t)}</span>`).join(' ');
+  $('dayNote').textContent=plan?.note||'';
+  if(!plan&&!fixed.length){
+    $('timeline').innerHTML=`<li class="empty"><div style="font-size:40px">🌤️</div><h3>A blank day</h3>Tap <b>Plan my day</b> and the AI will fill every free hour around your calendar with things worth doing, plus rest.</li>`;
+  } else $('timeline').innerHTML=all.map(it=>{
+    const a=toMin(it.start),b=toMin(it.end),m=b-a;
+    if(it.gap) return `<li class="gap"><div></div><div></div><div class="info">${dur(m)} unplanned <button class="fill" data-gap="${it.start}-${it.end}">✨ Fill</button></div><div></div></li>`;
+    const [emo,c]=look(it),ai=it._i!==undefined,h=it.overlay?32:Math.max(44,Math.min(150,m*.9));
+    const cls=['ev',ai?'':'fixed',it.overlay?'overlay':'',it.done?'done':'',nowM>=a&&nowM<b?'now':''].join(' ');
+    return `<li class="${cls}" style="--c:${c}" data-${ai?'i':'f'}="${ai?it._i:it._f}">
+      <div class="t">${it.overlay?'':it.start}</div><div class="pill" style="height:${h}px">${emo}</div>
+      <div class="info"><div class="meta">${it.start} – ${it.end} · ${dur(m)}${it.overlay?' · alongside':''}</div><div class="ttl">${esc(it.title)}</div>
+      ${it.resource?`<div class="sub">${esc(it.resource.title)}${it.resource.creator?' · '+esc(it.resource.creator):''}</div>`:ai&&it.detail?`<div class="sub">${esc(it.detail)}</div>`:''}</div>
+      ${ai?`<button class="chk" data-done="${it._i}" aria-label="Mark done">${it.done?'✓':''}</button>`:'<div></div>'}</li>`;
+  }).join('');
+  // progress
+  const done=blocks.filter(b=>b.done),growth=done.filter(b=>!['meal','break','rest','chores','social'].includes(b.type)).reduce((s,b)=>s+toMin(b.end)-toMin(b.start),0);
+  const pct=blocks.length?done.length/blocks.length:0;
+  $('stats').innerHTML=`<div class="ring"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--surface2)" stroke-width="4"/>
+    <circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--accent)" stroke-width="4" stroke-linecap="round" stroke-dasharray="${pct*97.4} 97.4"/></svg>
+    <div><b>${done.length} of ${blocks.length}</b><span>${dur(growth)} of growth time</span></div></div>`;
+  renderPodcast();
+}
+async function loadDay(){
+  events=[];allDay=[];
+  if(token) try{events=await fetchEvents(cur)}catch(e){toast(e.message,1)}
+  slotOpts={}; renderDay();
+  $('jText').value=S.journal[cur]||''; $('jOut').innerHTML='';
+  $('jDate').textContent=new Date(cur+'T12:00').toLocaleDateString(undefined,{weekday:'long',day:'numeric',month:'long'});
+}
+
+// ---------- sheet ----------
+function openSheet(kind,idx){
+  const it=kind==='i'?S.plans[cur].blocks[idx]:fixedItems()[idx]; if(!it) return;
+  sheetIdx=kind==='i'?idx:null;
+  const [emo,c]=look(it),r=it.resource,url=safeUrl(r?.url),ai=kind==='i';
+  const opts=(slotOpts[idx]&&ai?slotOpts[idx]:[]).map((o,k)=>`<button class="opt" data-pick="${k}">${look(o)[0]} <b>${esc(o.title)}</b><small>${esc(o.resource?.title||o.detail||'')}</small></button>`).join('');
+  $('sheet').innerHTML=`<div class="grab"></div><div class="sh-head" style="--c:${c}"><div class="pill" style="--c:${c};background:${c}">${emo}</div>
+    <div><div class="meta">${it.start} – ${it.end} · ${dur(toMin(it.end)-toMin(it.start))}</div><h2 class="rounded">${esc(it.title)}</h2></div></div>
+    <div class="sh-body">${it.detail?`<p>${esc(it.detail)}</p>`:''}${!ai?`<p class="mute">${it.src==='gcal'?'From Google Calendar':'From your routine'}</p>`:''}
+    ${r?`<a class="res" ${url?`href="${esc(url)}"`:`href="https://www.google.com/search?q=${encodeURIComponent(r.title+' '+(r.creator||''))}"`} target="_blank" rel="noopener"><b>${esc(r.title)} ↗</b><small>${esc(r.creator||'')}${r.minutes?` · ${r.minutes} min`:''}</small></a>`:''}
+    ${ai?`<div class="btnrow"><button class="btn ${it.done?'':'pri'}" data-s="done">${it.done?'Mark not done':'✓ Done'}</button>
+      <button class="btn" data-s="up" aria-label="More like this">👍</button><button class="btn" data-s="down" aria-label="Less like this">👎</button>
+      <button class="btn" data-s="alt">↻ Other options</button></div>${opts}
+      <div class="btnrow"><button class="btn sm" data-s="del" style="color:var(--bad)">Remove block</button></div>`:''}
+    <div class="btnrow"><button class="btn sm" data-s="close">Close</button></div></div>`;
+  if(!$('sheet').open) $('sheet').showModal();
+}
+$('sheet').onclick=async e=>{
+  if(e.target===$('sheet')) return $('sheet').close(); // backdrop tap
+  const b=e.target.closest('[data-s],[data-pick]'); if(!b) return;
+  const i=sheetIdx,a=b.dataset.s,blocks=S.plans[cur]?.blocks;
+  if(a==='close') return $('sheet').close();
+  if(b.dataset.pick!==undefined){remember(`Swapped "${blocks[i].title}" for "${slotOpts[i][b.dataset.pick].title}"`);
+    dropEvent(blocks[i]);blocks[i]={...slotOpts[i][b.dataset.pick]};delete slotOpts[i];save();renderDay();return openSheet('i',i)}
+  if(a==='alt') return busy(b,async()=>{await altSlot(i);openSheet('i',i)})();
+  if(a==='del'){dropEvent(blocks[i]);blocks.splice(i,1);save();$('sheet').close();return renderDay()}
+  feedback(i,a); openSheet('i',i);
+};
+
+// ---------- AI planning ----------
+const BLOCK_SCHEMA=`{"start":"HH:MM","end":"HH:MM","type":"learn|podcast|video|reading|practice|exercise|meal|break|rest|social|reflect|chores","title":"short, 2-5 words","detail":"one line: what and why","overlay":false,"resource":{"title":"exact real title","creator":"author/show/channel","url":"https://… or empty","minutes":0} or null}`;
+const RULES=`- Be humane: meals, breaks, movement, social time and a wind-down are part of a good day. Not every slot is learning.
+- Put deep learning where energy is likely highest and light content into short gaps. Match resource length to block length.
+- Rotate topics across the week toward the stated goals, build on what was consumed recently, and respect liked/disliked patterns.
+- For learn/podcast/video/reading/practice blocks, recommend a SPECIFIC real resource (use search to verify it exists; give a url only when sure, else "").`;
+const cleanBlocks=bs=>(bs||[]).filter(b=>/^\d\d:\d\d$/.test(b.start)&&/^\d\d:\d\d$/.test(b.end)&&toMin(b.end)>toMin(b.start)).map(b=>({...b,done:false}));
+async function planDay(){
+  const fixed=fixedItems(),wd=new Date(cur+'T12:00').toLocaleDateString('en',{weekday:'long'});
+  const d=await gemini(`You are an AI day planner whose purpose is to remove friction from personal development. Plan ${wd} ${cur}.
+${context()}
+FIXED COMMITMENTS (never move, never overlap with non-overlay blocks):
+${fixed.map(f=>`- ${f.start}-${f.end} ${f.title}`).join('\n')||'- none'}
+${allDay.length?'All-day: '+allDay.join(', '):''}
+FREE GAPS TO FILL: ${gaps(fixed).map(g=>g.start+'-'+g.end).join(', ')}
+RULES
+- Your blocks plus the fixed commitments must account for EVERY minute from ${S.profile.wake} to ${S.profile.sleep}, with no gaps.
+${RULES}
+- Passive fixed items (commute, cardio, chores) may get an extra block with "overlay":true at the same times, e.g. a podcast during the commute.
+Return ONLY JSON: {"note":"one warm sentence on today's theme","blocks":[${BLOCK_SCHEMA}]}`,{search:true});
+  (S.plans[cur]?.blocks||[]).forEach(dropEvent); slotOpts={};
+  S.plans[cur]={note:d.note||'',blocks:cleanBlocks(d.blocks)}; save(); renderDay();
+}
+async function fillGap(start,end){
+  const d=await gemini(`${context()}
+Fill the free time ${start}-${end} on ${cur} with 1-3 blocks that exactly cover it.
+${RULES}
+Return ONLY JSON: {"blocks":[${BLOCK_SCHEMA}]}`,{search:true});
+  const add=cleanBlocks(d.blocks).filter(b=>toMin(b.start)>=toMin(start)&&toMin(b.end)<=toMin(end));
+  if(!add.length) throw new Error('The AI had no suggestions for that gap. Try again.');
+  (S.plans[cur]??={note:'',blocks:[]}).blocks.push(...add); save(); renderDay();
+}
+async function altSlot(i){
+  const b=S.plans[cur].blocks[i];
+  const d=await gemini(`${context()}
+The user wants alternatives for the ${b.start}-${b.end} slot on ${cur} (currently: ${b.type} "${b.title}"${b.resource?' — '+b.resource.title:''}).
+Give 3 different options that fit exactly ${toMin(b.end)-toMin(b.start)} minutes, varied in topic and format, matching their tastes. Real, verified resources.
+Return ONLY JSON: {"options":[${BLOCK_SCHEMA}]} with start "${b.start}" and end "${b.end}"${b.overlay?' and overlay true':''}.`,{search:true});
+  slotOpts[i]=cleanBlocks(d.options);
+}
+function feedback(i,act){
+  const b=S.plans[cur].blocks[i],what=`${b.type} "${b.title}"${b.resource?` (${b.resource.title}${b.resource.creator?' by '+b.resource.creator:''})`:''} at ${b.start}`;
+  if(act==='done'){b.done=!b.done; if(b.done&&b.resource) S.learned.push({date:cur,title:b.title,type:b.type,resource:b.resource,detail:b.detail});
+    if(!b.done) S.learned=S.learned.filter(l=>!(l.date===cur&&l.title===b.title))}
+  if(act==='up'){remember('Liked '+what);toast('Got it. More like this.')}
+  if(act==='down'){remember('Disliked '+what);toast('Got it. Less like this.')}
+  save(); renderDay(); renderQuizSrc();
+}
+
+// ---------- commute podcast ----------
+function renderPodcast(){
+  const p=S.podcasts[cur],url=safeUrl(p?.url);
+  $('commute').innerHTML=p?`<div class="ep">${esc(p.title)}</div><div class="show">${esc(p.show)} · ~${esc(p.minutes)} min</div><div class="why">${esc(p.why)}</div>
+    <div class="btnrow"><a class="btn pri sm" target="_blank" rel="noopener" href="${url?esc(url):`https://www.google.com/search?q=${encodeURIComponent(p.show+' '+p.title)}`}">▶ Listen</a>
+    <button class="btn sm" id="podBtn">↻ New</button><button class="btn sm" id="podMore">More options</button>
+    <button class="btn sm" data-pod="up" aria-label="Liked">👍</button><button class="btn sm" data-pod="down" aria-label="Disliked">👎</button></div>`
+    :`<p class="mute" style="margin:0">A ${S.profile.commuteMin}-minute episode picked for you, different every day.</p>
+    <div class="btnrow"><button class="btn pri sm" id="podBtn">Pick today's episode</button><button class="btn sm" id="podMore">Show 3 options</button></div>`;
+  $('podBtn').onclick=busy($('podBtn'),podcastPick); $('podMore').onclick=busy($('podMore'),podcastMore);
+}
+async function suggestPodcast(n){
+  const past=Object.values(S.podcasts).slice(-30).map(p=>`${p.show}: ${p.title}`).join('; ');
+  const d=await gemini(`${context()}
+Suggest ${n} real podcast episode(s) about ${S.profile.commuteMin} minutes long (±5) for the user's commute on ${cur}. Use search to verify each episode exists.
+Vary topics day to day toward their interests and goals. Never suggest any of these already-suggested episodes: ${past||'none'}.
+Return ONLY JSON: {"episodes":[{"show":"","title":"exact episode title","minutes":0,"url":"https://… or empty","why":"one line on why it fits today"}]}`,{search:true});
+  return d.episodes||[];
+}
+let podChoices=[];
+async function podcastPick(){const [e]=await suggestPodcast(1); if(e){S.podcasts[cur]=e;save();$('podOpts').innerHTML='';renderPodcast()}}
+async function podcastMore(){
+  podChoices=await suggestPodcast(3);
+  $('podOpts').innerHTML=podChoices.map((e,k)=>`<button class="opt" data-podk="${k}"><b>${esc(e.title)}</b><small>${esc(e.show)} · ${esc(e.minutes)} min</small></button>`).join('');
+}
+$('podOpts').onclick=e=>{const k=e.target.closest('[data-podk]')?.dataset.podk; if(k!==undefined){S.podcasts[cur]=podChoices[k];save();$('podOpts').innerHTML='';renderPodcast()}};
+$('commute').onclick=e=>{const v=e.target.dataset.pod,p=S.podcasts[cur]; if(v&&p){remember(`${v==='up'?'Liked':'Disliked'} podcast "${p.title}" (${p.show})`);toast(v==='up'?'Got it. More like this.':'Got it. Less like this.')}};
+
+// ---------- quiz ----------
+let quiz=null;
+function renderQuizSrc(){
+  $('quizSrc').innerHTML=S.learned.map((l,i)=>[l,i]).reverse().map(([l,i])=>{const[e,c]=TYPES[l.type]||TYPES.learn;
+    return `<button class="src" data-q="${i}"><div class="pill" style="background:${c}">${e}</div><div><b>${esc(l.resource?.title||l.title)}</b><small>${esc(l.date)}${l.resource?.creator?' · '+esc(l.resource.creator):''}</small></div></button>`}).join('')
+    ||`<p class="mute" style="margin:0 4px">Tick blocks off on your timeline and they show up here, ready to quiz you on.</p>`;
+  $('quizHist').innerHTML=S.quizzes.slice().reverse().map(q=>`<div class="field"><label style="width:auto;flex:1">${esc(q.title)}<br><span class="mute">${esc(q.date)}</span></label><b>${q.score}/${q.total}</b></div>`).join('')
+    ||'<div class="field mute">No quizzes yet.</div>';
+}
+async function makeQuiz(i){
+  const l=S.learned[i],r=l.resource||{};
+  $('quizBox').innerHTML=`<div class="thinking"><span class="dots"><span></span><span></span><span></span></span>Reading up on “${esc(r.title||l.title)}”…</div>`;
+  try{
+    const d=await gemini(`Create a 5-question multiple-choice quiz on the SPECIFIC content the user consumed, not the general topic.
+Content: ${r.title||l.title}${r.creator?' by '+r.creator:''} ${safeUrl(r.url)} (${l.type}; planner note: ${l.detail||''}).
+Use search to look up what this specific piece actually covers (episode notes, transcript, summary, chapter list). Mix recall and understanding.
+${S.quizzes.some(q=>q.title===(r.title||l.title))?'They have been quizzed on this before, so ask different questions.':''}
+Return ONLY JSON: {"questions":[{"q":"","choices":["","","",""],"answer":0,"why":"one-line explanation"}]}`,{search:true});
+    quiz={title:r.title||l.title,qs:(d.questions||[]).filter(q=>q.choices?.length),got:[]};
+    renderQuiz();
+  }catch(e){$('quizBox').innerHTML='';toast(e.message,1)}
+}
+function renderQuiz(){
+  const n=quiz.got.length,doneAll=n===quiz.qs.length;
+  if(doneAll){
+    const score=quiz.got.filter(Boolean).length;
+    S.quizzes.push({date:today(),title:quiz.title,score,total:quiz.qs.length});
+    remember(`Quiz on "${quiz.title}": ${score}/${quiz.qs.length}${score/quiz.qs.length<.6?' (retention weak, worth revisiting)':''}`);
+    $('quizBox').innerHTML=`<div class="card score"><div class="mute">${esc(quiz.title)}</div><b>${score}/${quiz.qs.length}</b>${score===quiz.qs.length?'Perfect. 🎉':score/quiz.qs.length>=.6?'Nicely retained.':'Worth a second listen. The planner will revisit this.'}
+      <div class="btnrow" style="justify-content:center"><button class="btn" id="quizDone">Done</button></div></div>`;
+    $('quizDone').onclick=()=>{$('quizBox').innerHTML=''}; quiz=null; renderQuizSrc(); return;
+  }
+  const q=quiz.qs[n];
+  $('quizBox').innerHTML=`<div class="card qcard"><div class="qnum">${esc(quiz.title)} · ${n+1} of ${quiz.qs.length}</div><h4>${esc(q.q)}</h4>
+    ${q.choices.map((c,k)=>`<button class="ch" data-ch="${k}">${esc(c)}</button>`).join('')}<div class="why"></div></div>`;
+}
+$('quizBox').onclick=e=>{
+  const b=e.target.closest('[data-ch]'); if(!b||!quiz) return;
+  const box=b.parentElement; if(box.dataset.answered) {return}
+  box.dataset.answered=1; const q=quiz.qs[quiz.got.length],k=+b.dataset.ch,ok=k===q.answer;
+  box.querySelectorAll('.ch')[q.answer]?.classList.add('right'); if(!ok) b.classList.add('wrong');
+  box.querySelector('.why').innerHTML=`${ok?'✓ Correct.':'✗ Not quite.'} ${esc(q.why)}<div class="btnrow"><button class="btn pri" id="qNext">${quiz.got.length+1===quiz.qs.length?'See score':'Next'}</button></div>`;
+  quiz.got.push(ok); $('qNext').onclick=renderQuiz;
+};
+$('quizSrc').onclick=e=>{const b=e.target.closest('[data-q]'); if(b&&!quiz) makeQuiz(+b.dataset.q)};
+
+// ---------- journal + interview ----------
+async function reflect(){
+  S.journal[cur]=$('jText').value; save();
+  if(!S.journal[cur].trim()) throw new Error('Write a few lines first.');
+  const plan=S.plans[cur];
+  const d=await gemini(`${context()}
+TODAY'S PLAN: ${plan?plan.blocks.map(b=>`${b.start} ${b.title}${b.done?' (done)':''}`).join('; '):'none'}
+JOURNAL ENTRY (${cur}): """${S.journal[cur]}"""
+Respond as a warm, concise coach. Return ONLY JSON: {"reflection":"2-4 sentences","tomorrow":"one concrete suggestion","learned":["0-3 short, durable facts about the user's preferences, energy or habits that a planner should remember"]}`);
+  (d.learned||[]).forEach(x=>remember('From journal: '+x));
+  $('jOut').innerHTML=`<div class="card"><h3>✨ Reflection</h3><p style="margin:0">${esc(d.reflection)}</p></div>
+    <div class="card"><h3>🌱 For tomorrow</h3><p style="margin:0">${esc(d.tomorrow)}</p></div>
+    ${d.learned?.length?`<p class="mute" style="margin:0 4px">Remembered: ${d.learned.map(esc).join(' · ')}</p>`:''}`;
+}
+async function interview(){
+  const d=await gemini(`${context()}
+You are getting to know the user to plan their free time for personal growth. Ask the 5 most useful questions you don't already know the answers to (energy patterns, preferred formats, topics, constraints, motivation). Keep each under 15 words.
+Return ONLY JSON: {"questions":["",...]}`);
+  $('interview').innerHTML=`<div class="group">${(d.questions||[]).map(q=>`<div class="field col"><label>${esc(q)}</label><textarea data-iq="${esc(q)}" style="min-height:44px"></textarea></div>`).join('')}</div>
+    <div class="btnrow" style="margin:-8px 0 22px"><button class="btn pri" id="ivSave">Save answers</button></div>`;
+  $('ivSave').onclick=()=>{document.querySelectorAll('[data-iq]').forEach(el=>el.value.trim()&&remember(`Q: ${el.dataset.iq} A: ${el.value.trim()}`));$('interview').innerHTML='';toast('Saved. The planner will use this.')};
+}
+
+// ---------- wiring ----------
+function showTab(t){document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));
+  document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id===t));$('planBtn').hidden=t!=='today';scrollTo(0,0)}
+function busy(btn,fn){return async(...a)=>{if(btn.disabled) return;const h=btn.innerHTML;btn.disabled=true;btn.innerHTML='<span class="dots"><span></span><span></span><span></span></span>';
+  try{await fn(...a)}catch(e){toast(e.message,1)}finally{btn.disabled=false;btn.innerHTML=h}}}
+$('nav').onclick=e=>{const b=e.target.closest('[data-tab]'); if(b) showTab(b.dataset.tab)};
+const go=iso=>{cur=iso;loadDay()};
+const shift=n=>{const d=new Date(cur+'T12:00');d.setDate(d.getDate()+n);go(d.toLocaleDateString('en-CA'))};
+$('prev').onclick=()=>shift(-7); $('next').onclick=()=>shift(7);
+$('week').onclick=e=>{const b=e.target.closest('[data-d]'); if(b) go(b.dataset.d)};
+$('date').onchange=e=>go(e.target.value||today());
+$('gcalBtn').onclick=connectGcal;
+$('pushBtn').onclick=busy($('pushBtn'),pushPlan);
+$('planBtn').onclick=async()=>{
+  $('thinking').innerHTML=`<div class="thinking"><span class="dots"><span></span><span></span><span></span></span>Looking at your day and finding things worth your time…</div>`;
+  await busy($('planBtn'),planDay)(); $('thinking').innerHTML='';
+};
+$('timeline').onclick=e=>{
+  const done=e.target.closest('[data-done]'); if(done){e.stopPropagation();return feedback(+done.dataset.done,'done')}
+  const g=e.target.closest('[data-gap]'); if(g){const[s,en]=g.dataset.gap.split('-');return busy(g,fillGap)(s,en)}
+  const li=e.target.closest('.ev'); if(li) openSheet(li.dataset.i!==undefined?'i':'f',+(li.dataset.i??li.dataset.f));
+};
+$('jBtn').onclick=busy($('jBtn'),reflect);
+$('jText').oninput=e=>{S.journal[cur]=e.target.value;save()};
+$('interviewBtn').onclick=busy($('interviewBtn'),interview);
+for(const [grp,pre] of [['settings','s_'],['profile','p_']]) for(const k in S[grp]){const el=$(pre+k); if(!el) continue; el.value=S[grp][k];
+  el.oninput=()=>{S[grp][k]=el.type==='number'?+el.value:el.value; if(k==='clientId') tokenClient=null; save(); if(grp==='profile') renderDay()}}
+$('memory').value=S.memory.join('\n');
+$('memory').onchange=e=>{S.memory=e.target.value.split('\n').filter(l=>l.trim());save()};
+$('origin').textContent=location.origin;
+$('exportBtn').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify({...S,settings:{...S.settings,geminiKey:''}},null,1)],{type:'application/json'}));a.download=`planner-backup-${today()}.json`;a.click()};
+$('importIn').onchange=async e=>{try{const d=JSON.parse(await e.target.files[0].text());const key=S.settings.geminiKey;S={...S,...d};S.settings.geminiKey||=key;save();location.reload()}catch{toast('That is not a valid backup file.',1)}};
+setInterval(()=>cur===today()&&$('today').classList.contains('on')&&!$('sheet').open&&renderDay(),60000); // keep "now" highlight current
+renderQuizSrc(); loadDay();
+if(!S.settings.geminiKey) setTimeout(()=>toast('Welcome! Start under You: add a Gemini key and tell the planner about yourself.'),400);
+</script>
+</body>
+</html>
