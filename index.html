@@ -302,32 +302,48 @@ const look=it=>it.src==='gcal'?['📅','#B4B4BA']:it.src==='routine'?[/commut|tr
 const GAPI='https://generativelanguage.googleapis.com/v1beta/';
 // Ask Google which models this key can use and pick the newest general-purpose Flash.
 // Model names churn and older ones get closed to new accounts, so never hardcode one.
-async function pickModel(){
+let modelList=null; // ranked Flash models this key can use, fetched once per session
+async function listModels(){
   const r=await fetch(GAPI+'models?pageSize=1000',{headers:{'x-goog-api-key':S.settings.geminiKey}}), d=await r.json();
   if(!r.ok) throw new Error('Gemini: '+(d.error?.message||r.status));
   const ver=n=>parseFloat(n.match(/gemini-(\d+(?:\.\d+)?)/)?.[1]||0);
   const ok=(d.models||[]).filter(m=>m.supportedGenerationMethods?.includes('generateContent')).map(m=>m.name.replace('models/',''))
-    .filter(n=>/^gemini-.*flash/.test(n)&&!/lite|image|tts|audio|live|embed|thinking/.test(n));
-  const rank=n=>[/preview|exp/.test(n)?1:0,-ver(n),n.length]; // stable first, newest, then shortest name
-  ok.sort((a,b)=>{const x=rank(a),y=rank(b);return x[0]-y[0]||x[1]-y[1]||x[2]-y[2]});
+    .filter(n=>/^gemini-.*flash/.test(n)&&!/image|tts|audio|live|embed|thinking/.test(n));
+  // full Flash before Lite, stable before preview, newest first, then shortest name
+  const rank=n=>[/preview|exp/.test(n)?1:0,/lite/.test(n)?1:0,-ver(n),n.length];
+  ok.sort((a,b)=>{const x=rank(a),y=rank(b);return x[0]-y[0]||x[1]-y[1]||x[2]-y[2]||x[3]-y[3]});
   if(!ok.length) throw new Error('No Flash model is available for this API key.');
-  S.settings.model=ok[0]; $('s_model').value=ok[0]; save(); return ok[0];
+  return ok;
 }
-async function gemini(prompt,{search=false}={},retried=false){
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function gemini(prompt,{search=false}={}){
   if(!S.settings.geminiKey){showTab('you');throw new Error('Add your Gemini key under You → Connections first.')}
-  const model=S.settings.model.trim()||await pickModel();
+  modelList??=await listModels();
+  const pref=S.settings.model.trim(), order=[...new Set([pref,...modelList].filter(Boolean))].slice(0,4);
   const body={contents:[{role:'user',parts:[{text:prompt}]}]};
   // google_search grounding can't be combined with JSON mode, so search calls parse JSON out of text
   if(search) body.tools=[{google_search:{}}]; else body.generationConfig={responseMimeType:'application/json'};
-  const r=await fetch(`${GAPI}models/${encodeURIComponent(model)}:generateContent`,
-    {method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':S.settings.geminiKey},body:JSON.stringify(body)});
-  const d=await r.json();
-  if(!r.ok){
-    const msg=d.error?.message||String(r.status);
-    if(!retried&&(r.status===404||/no longer available|not found|deprecat|not supported/i.test(msg))){S.settings.model='';return gemini(prompt,{search},true)}
-    throw new Error('Gemini: '+msg);
+  let lastMsg='';
+  for(const [k,model] of order.entries()){
+    for(let attempt=0;attempt<2;attempt++){
+      const r=await fetch(`${GAPI}models/${encodeURIComponent(model)}:generateContent`,
+        {method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':S.settings.geminiKey},body:JSON.stringify(body)});
+      const d=await r.json().catch(()=>({}));
+      if(r.ok){
+        if(!S.settings.model.trim()){S.settings.model=model;$('s_model').value=model;save()} // remember the auto pick
+        else if(model!==pref) toast(`${pref} is busy, so ${model} answered this one.`);
+        return parseJSON((d.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join(''));
+      }
+      lastMsg=d.error?.message||String(r.status);
+      if(r.status===404||/no longer available|not found|deprecat|not supported/i.test(lastMsg)){ // retired: forget it, try the next
+        modelList=modelList.filter(m=>m!==model);
+        if(model===pref){S.settings.model='';$('s_model').value='';save()} break}
+      if(r.status===429||r.status>=500||/high demand|overloaded|unavailable|exhausted|try again/i.test(lastMsg)){ // busy: wait once, then fall back
+        if(attempt===0){await sleep(2000*(k+1));continue} break}
+      throw new Error('Gemini: '+lastMsg);
+    }
   }
-  return parseJSON((d.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join(''));
+  throw new Error('Gemini is overloaded right now. Wait a minute and try again. ('+lastMsg+')');
 }
 function parseJSON(t){
   const fence=t.match(/```(?:json)?\s*([\s\S]*?)```/); if(fence) t=fence[1];
