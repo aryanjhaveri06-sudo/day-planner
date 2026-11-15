@@ -276,7 +276,7 @@ details.setup li{margin:6px 0}
 <div id="toast"></div>
 
 <script>
-const VER='2026-11-15.4';
+const VER='2026-11-15.5';
 // Crash breadcrumbs: written synchronously so they survive iOS killing the page mid-action.
 const crumb=(step,extra={})=>{try{localStorage.setItem('planner-debug',JSON.stringify({step,at:new Date().toLocaleTimeString(),ver:VER,...extra}))}catch{}};
 // ---------- state ----------
@@ -332,7 +332,7 @@ async function gemini(prompt,{search=false}={}){
   const body={contents:[{role:'user',parts:[{text:prompt}]}]};
   // google_search grounding can't be combined with JSON mode, so search calls parse JSON out of text
   if(search) body.tools=[{google_search:{}}]; else body.generationConfig={responseMimeType:'application/json'};
-  let lastMsg='';
+  let lastMsg='',quota=false;
   for(const [k,model] of order.entries()){
     for(let attempt=0;attempt<2;attempt++){
       crumb(`waiting for ${model} (try ${attempt+1})`);
@@ -351,11 +351,15 @@ async function gemini(prompt,{search=false}={}){
       if(r.status===404||/no longer available|not found|deprecat|not supported/i.test(lastMsg)){ // retired: forget it, try the next
         modelList=modelList.filter(m=>m!==model);
         if(model===pref){S.settings.model='';$('s_model').value='';save()} break}
-      if(r.status===429||r.status>=500||/high demand|overloaded|unavailable|exhausted|try again/i.test(lastMsg)){ // busy: wait once, then fall back
+      if(r.status===429||/quota|exhausted|rate limit/i.test(lastMsg)){quota=true;break} // usage limit: retrying this model won't help, try the next
+      if(r.status>=500||/high demand|overloaded|unavailable|try again/i.test(lastMsg)){ // busy: wait once, then fall back
         if(attempt===0){await sleep(2000*(k+1));continue} break}
       throw new Error('Gemini: '+lastMsg);
     }
   }
+  // Free-tier keys run out of web-search allowance first; a plan without search is better than no plan.
+  if(quota&&search){toast('Web search allowance used up, so this was planned without it. Use "find" links to locate resources.');return gemini(prompt,{search:false})}
+  if(quota) throw new Error('Your Gemini key has hit its usage limit. On the free tier it resets daily; adding billing in Google AI Studio removes this. ('+lastMsg+')');
   throw new Error('Gemini is overloaded right now. Wait a minute and try again. ('+lastMsg+')');
 }
 function parseJSON(t){
