@@ -258,6 +258,8 @@ details.setup li{margin:6px 0}
   <div class="group">
     <div class="field"><label>Gemini key</label><input id="s_geminiKey" type="password" autocomplete="off" placeholder="Paste key"></div>
     <div class="field"><label>Gemini model</label><input id="s_model" placeholder="Auto (newest Flash)"></div>
+    <div class="field"><button class="btn sm" id="testBtn">Test connection</button><span class="mute" style="flex:1">Checks your key, model and web search step by step.</span></div>
+    <div class="field col" id="testOut" hidden></div>
     <div class="field"><label>Google client ID</label><input id="s_clientId" placeholder="…apps.googleusercontent.com"></div>
     <details class="setup"><summary>How to set these up</summary><ol>
       <li>Gemini key: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> → Create key → paste above.</li>
@@ -289,7 +291,10 @@ const dur=m=>m<60?`${m}m`:`${Math.floor(m/60)}h${m%60?` ${m%60}m`:''}`;
 const today=()=>new Date().toLocaleDateString('en-CA');
 const tz=Intl.DateTimeFormat().resolvedOptions().timeZone;
 let cur=today(),events=[],allDay=[],token=null,tokenClient=null,slotOpts={},sheetIdx=null;
-let toastT; function toast(t,err){const el=$('toast');el.textContent=t;el.className='show'+(err?' err':'');clearTimeout(toastT);toastT=setTimeout(()=>el.className=err?'err':'',err?7000:3500)}
+let toastT; function toast(t,err){const el=$('toast');
+  if(!err&&el.classList.contains('err')&&el.classList.contains('show')) return; // never hide an unread error behind an info message
+  el.textContent=err?t+'  (tap to dismiss)':t;el.className='show'+(err?' err':'');clearTimeout(toastT);
+  if(!err) toastT=setTimeout(()=>el.className='',3500)} // errors stay until tapped
 $('toast').onclick=()=>$('toast').className='';
 const remember=line=>{S.memory.push(`[${today()}] ${line}`);S.memory=S.memory.slice(-200);save();$('memory').value=S.memory.join('\n')};
 
@@ -686,8 +691,18 @@ $('timeline').onclick=e=>{
 $('jBtn').onclick=busy($('jBtn'),reflect);
 $('jText').oninput=e=>{S.journal[cur]=e.target.value;save()};
 $('interviewBtn').onclick=busy($('interviewBtn'),interview);
+$('testBtn').onclick=busy($('testBtn'),async()=>{
+  const out=$('testOut'),lines=[],show=(ok,t)=>{lines.push(`${ok?'✅':'❌'} ${esc(t)}`);out.innerHTML=lines.join('<br>');out.hidden=false};
+  lines.length=0; out.innerHTML='Testing…'; out.hidden=false;
+  if(!S.settings.geminiKey.trim()) return show(0,'No Gemini key saved on this device. Paste it above.');
+  try{modelList=await listModels();show(1,`Key works. Models available: ${modelList.join(', ')}`)}catch(e){return show(0,e.message)}
+  try{const t0=Date.now();await gemini('Return ONLY JSON: {"ok":true}');show(1,`${S.settings.model} answered in ${((Date.now()-t0)/1000).toFixed(1)}s`)}catch(e){return show(0,e.message)}
+  try{const t0=Date.now();await gemini('Use search to find today\'s date. Return ONLY JSON: {"date":""}',{search:true});show(1,`Web search works (${((Date.now()-t0)/1000).toFixed(1)}s). Planning should work.`)}catch(e){show(0,'Web search failed: '+e.message)}
+});
 for(const [grp,pre] of [['settings','s_'],['profile','p_']]) for(const k in S[grp]){const el=$(pre+k); if(!el) continue; el.value=S[grp][k];
-  el.oninput=()=>{S[grp][k]=el.type==='number'?+el.value:el.value; if(k==='clientId') tokenClient=null; save(); if(grp==='profile') renderDay()}}
+  el.oninput=()=>{S[grp][k]=el.type==='number'?+el.value:grp==='settings'?el.value.trim():el.value;
+    if(k==='clientId') tokenClient=null; if(k==='geminiKey') modelList=null; save(); if(grp==='profile') renderDay()}}
+if(S.settings.geminiKey!==S.settings.geminiKey.trim()){S.settings.geminiKey=S.settings.geminiKey.trim();save()} // fix keys saved with stray spaces
 $('memory').value=S.memory.join('\n');
 $('memory').onchange=e=>{S.memory=e.target.value.split('\n').filter(l=>l.trim());save()};
 $('origin').textContent=location.origin;
