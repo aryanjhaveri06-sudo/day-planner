@@ -257,7 +257,7 @@ details.setup li{margin:6px 0}
   <p class="glabel">Connections</p>
   <div class="group">
     <div class="field"><label>Gemini key</label><input id="s_geminiKey" type="password" autocomplete="off" placeholder="Paste key"></div>
-    <div class="field"><label>Gemini model</label><input id="s_model"></div>
+    <div class="field"><label>Gemini model</label><input id="s_model" placeholder="Auto (newest Flash)"></div>
     <div class="field"><label>Google client ID</label><input id="s_clientId" placeholder="…apps.googleusercontent.com"></div>
     <details class="setup"><summary>How to set these up</summary><ol>
       <li>Gemini key: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> → Create key → paste above.</li>
@@ -274,7 +274,7 @@ details.setup li{margin:6px 0}
 
 <script>
 // ---------- state ----------
-const DEF={settings:{geminiKey:'',model:'gemini-2.5-flash',clientId:''},
+const DEF={settings:{geminiKey:'',model:'',clientId:''},
   profile:{name:'',commuteMin:20,wake:'07:00',sleep:'23:00',routine:'',interests:'',goals:'',prefs:''},
   memory:[],plans:{},journal:{},quizzes:[],learned:[],podcasts:{}};
 let S; try{S=JSON.parse(localStorage.getItem('planner'))||{}}catch{S={}}
@@ -299,15 +299,34 @@ const TYPES={learn:['📚','#8E8CF0'],podcast:['🎧','#C58AF0'],video:['🎬','
 const look=it=>it.src==='gcal'?['📅','#B4B4BA']:it.src==='routine'?[/commut|travel|drive|train|bus/i.test(it.title)?'🚆':'🔁','#B4B4BA']:TYPES[it.type]||['✨','#8E8CF0'];
 
 // ---------- Gemini ----------
-async function gemini(prompt,{search=false}={}){
+const GAPI='https://generativelanguage.googleapis.com/v1beta/';
+// Ask Google which models this key can use and pick the newest general-purpose Flash.
+// Model names churn and older ones get closed to new accounts, so never hardcode one.
+async function pickModel(){
+  const r=await fetch(GAPI+'models?pageSize=1000',{headers:{'x-goog-api-key':S.settings.geminiKey}}), d=await r.json();
+  if(!r.ok) throw new Error('Gemini: '+(d.error?.message||r.status));
+  const ver=n=>parseFloat(n.match(/gemini-(\d+(?:\.\d+)?)/)?.[1]||0);
+  const ok=(d.models||[]).filter(m=>m.supportedGenerationMethods?.includes('generateContent')).map(m=>m.name.replace('models/',''))
+    .filter(n=>/^gemini-.*flash/.test(n)&&!/lite|image|tts|audio|live|embed|thinking/.test(n));
+  const rank=n=>[/preview|exp/.test(n)?1:0,-ver(n),n.length]; // stable first, newest, then shortest name
+  ok.sort((a,b)=>{const x=rank(a),y=rank(b);return x[0]-y[0]||x[1]-y[1]||x[2]-y[2]});
+  if(!ok.length) throw new Error('No Flash model is available for this API key.');
+  S.settings.model=ok[0]; $('s_model').value=ok[0]; save(); return ok[0];
+}
+async function gemini(prompt,{search=false}={},retried=false){
   if(!S.settings.geminiKey){showTab('you');throw new Error('Add your Gemini key under You → Connections first.')}
+  const model=S.settings.model.trim()||await pickModel();
   const body={contents:[{role:'user',parts:[{text:prompt}]}]};
   // google_search grounding can't be combined with JSON mode, so search calls parse JSON out of text
   if(search) body.tools=[{google_search:{}}]; else body.generationConfig={responseMimeType:'application/json'};
-  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(S.settings.model)}:generateContent`,
+  const r=await fetch(`${GAPI}models/${encodeURIComponent(model)}:generateContent`,
     {method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':S.settings.geminiKey},body:JSON.stringify(body)});
   const d=await r.json();
-  if(!r.ok) throw new Error('Gemini: '+(d.error?.message||r.status));
+  if(!r.ok){
+    const msg=d.error?.message||String(r.status);
+    if(!retried&&(r.status===404||/no longer available|not found|deprecat|not supported/i.test(msg))){S.settings.model='';return gemini(prompt,{search},true)}
+    throw new Error('Gemini: '+msg);
+  }
   return parseJSON((d.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join(''));
 }
 function parseJSON(t){
