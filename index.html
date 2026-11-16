@@ -90,7 +90,7 @@ section{display:none;max-width:1180px;margin:0 auto}section.on{display:block}
 .ev:active .pill{transform:scale(.96)}
 .ev .info{padding:10px 0 8px;min-width:0}
 .meta{font-size:13px;color:var(--ink2);font-variant-numeric:tabular-nums}
-.ttl{font-size:16.5px;font-weight:600;margin-top:1px;overflow-wrap:anywhere}
+.ttl{font-size:16.5px;font-weight:600;margin-top:1px;overflow-wrap:break-word;hyphens:auto;-webkit-hyphens:auto}
 .sub{font-size:14px;color:var(--ink2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .chk{width:26px;height:26px;margin-top:11px;border-radius:50%;border:2px solid var(--c);display:grid;place-items:center;color:#fff;font-size:14px;font-weight:700}
 .ev.done .chk{background:var(--c)}
@@ -184,10 +184,46 @@ details.setup li{margin:6px 0}
 #toast{position:fixed;z-index:50;left:50%;top:calc(var(--safet) + 12px);transform:translate(-50%,-140%);transition:transform .3s;max-width:min(92vw,480px);padding:11px 16px;border-radius:14px;background:var(--ink);color:var(--bg);font-size:14.5px;font-weight:500;box-shadow:0 10px 30px rgba(0,0,0,.2)}
 #toast.show{transform:translate(-50%,0)}
 #toast.err{background:var(--bad);color:#fff}
+
+/* ---------- native feel (iOS) ---------- */
+html{-webkit-text-size-adjust:100%;touch-action:manipulation}
+button,.nav,.chip,.wd,.pill,.fab,.ev,.gap,.glabel,label{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+/* iOS dims a control the instant it's pressed and eases back on release */
+.btn,.opt,.src,.chip,.fab,.ch,.fill,.res,.arr,.chk,.wd{transition:transform .35s cubic-bezier(.32,.72,0,1),opacity .35s}
+.btn:active,.opt:active,.src:active,.chip:active,.fab:active,.ch:active,.fill:active,.res:active,.arr:active,.wd:active{transform:scale(.96);opacity:.7;transition:none}
+.chk:active{transform:scale(.85);transition:none}
+.nav button:active svg{transform:scale(.88)}.nav button svg{transition:transform .3s cubic-bezier(.32,.72,0,1)}
+@media (max-width:759px){input,textarea,select,.field.col textarea{font-size:16px} /* <16px makes iOS zoom on focus */
+  .dayhead h1,.pagehead h1{font-size:34px;letter-spacing:.01em}}
+section.on{animation:fadein .22s ease-out}
+@keyframes fadein{from{opacity:0}}
+/* compact nav bar that fades in once the large title scrolls away, like UINavigationBar */
+.topbar{position:fixed;z-index:19;top:0;left:0;right:0;height:calc(var(--safet) + 44px);padding-top:var(--safet);display:grid;place-items:center;font-weight:600;font-size:17px;
+  background:color-mix(in srgb,var(--bg) 80%,transparent);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);
+  border-bottom:.5px solid var(--line);opacity:0;pointer-events:none;transition:opacity .2s}
+.topbar.show{opacity:1}
+@media (min-width:760px){.topbar{display:none}}
+/* sheet: slides up with the iOS spring curve, drags down to dismiss */
+dialog[open]{animation:sheetin .5s cubic-bezier(.32,.72,0,1)}
+dialog[open]::backdrop{animation:fadein .3s}
+dialog.closing{animation:sheetout .28s cubic-bezier(.4,0,1,1) forwards}
+dialog.closing::backdrop{animation:fadeout .28s forwards}
+@keyframes sheetin{from{transform:translateY(100%)}}
+@keyframes sheetout{to{transform:translateY(100%)}}
+@keyframes fadeout{to{opacity:0}}
+@media (min-width:760px){@keyframes sheetin{from{transform:scale(.94);opacity:0}}@keyframes sheetout{to{transform:scale(.96);opacity:0}}}
+dialog{overscroll-behavior:contain}
+.chk.pop{animation:pop .4s cubic-bezier(.32,.72,0,1)}
+@keyframes pop{0%{transform:scale(.6)}60%{transform:scale(1.18)}100%{transform:scale(1)}}
+#toast{transition:transform .45s cubic-bezier(.32,.72,0,1)}
+#hap{position:fixed;left:-99px;opacity:0;pointer-events:none}
+@media (prefers-reduced-motion:reduce){*,*::before,::backdrop{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
 
+<div class="topbar" id="topbar" aria-hidden="true"><span id="topTitle"></span></div>
+<label id="hap" aria-hidden="true"><input type="checkbox" switch tabindex="-1"></label>
 <nav class="nav" id="nav">
   <div class="brand">Planner</div>
   <button data-tab="today" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3.5" y="5" width="17" height="15.5" rx="3.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>Today</button>
@@ -278,7 +314,7 @@ details.setup li{margin:6px 0}
 <div id="toast"></div>
 
 <script>
-const VER='2026-11-16.3';
+const VER='2026-11-16.4';
 // Crash breadcrumbs: written synchronously so they survive iOS killing the page mid-action.
 const crumb=(step,extra={})=>{try{localStorage.setItem('planner-debug',JSON.stringify({step,at:new Date().toLocaleTimeString(),ver:VER,...extra}))}catch{}};
 // ---------- state ----------
@@ -537,14 +573,14 @@ function openSheet(kind,idx){
   if(!$('sheet').open) $('sheet').showModal();
 }
 $('sheet').onclick=async e=>{
-  if(e.target===$('sheet')) return $('sheet').close(); // backdrop tap
+  if(e.target===$('sheet')) return closeSheet(); // backdrop tap
   const b=e.target.closest('[data-s],[data-pick]'); if(!b) return;
   const i=sheetIdx,a=b.dataset.s,blocks=S.plans[cur]?.blocks;
-  if(a==='close') return $('sheet').close();
+  if(a==='close') return closeSheet();
   if(b.dataset.pick!==undefined){remember(`Swapped "${blocks[i].title}" for "${slotOpts[i][b.dataset.pick].title}"`);
     dropEvent(blocks[i]);blocks[i]={...slotOpts[i][b.dataset.pick]};delete slotOpts[i];save();renderDay();return openSheet('i',i)}
   if(a==='alt') return busy(b,async()=>{await altSlot(i);openSheet('i',i)})();
-  if(a==='del'){dropEvent(blocks[i]);blocks.splice(i,1);save();$('sheet').close();return renderDay()}
+  if(a==='del'){dropEvent(blocks[i]);blocks.splice(i,1);save();closeSheet();return renderDay()}
   feedback(i,a); openSheet('i',i);
 };
 
@@ -679,7 +715,7 @@ function renderQuiz(){
 $('quizBox').onclick=e=>{
   const b=e.target.closest('[data-ch]'); if(!b||!quiz) return;
   const box=b.parentElement; if(box.dataset.answered) {return}
-  box.dataset.answered=1; const q=quiz.qs[quiz.got.length],k=+b.dataset.ch,ok=k===q.answer;
+  box.dataset.answered=1; haptic(); const q=quiz.qs[quiz.got.length],k=+b.dataset.ch,ok=k===q.answer;
   box.querySelectorAll('.ch')[q.answer]?.classList.add('right'); if(!ok) b.classList.add('wrong');
   box.querySelector('.why').innerHTML=`${ok?'✓ Correct.':'✗ Not quite.'} ${esc(q.why)}<div class="btnrow"><button class="btn pri" id="qNext">${quiz.got.length+1===quiz.qs.length?'See score':'Next'}</button></div>`;
   quiz.got.push(ok); $('qNext').onclick=renderQuiz;
@@ -710,13 +746,52 @@ Return ONLY JSON: {"questions":["",...]}`);
 }
 
 // ---------- wiring ----------
-function showTab(t){document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));
-  document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id===t));$('planBtn').hidden=t!=='today';scrollTo(0,0)}
+// ---------- native feel ----------
+const calm=matchMedia('(prefers-reduced-motion: reduce)');
+// iOS 18+ Safari plays a haptic when a switch input is toggled through its label; elsewhere vibrate() or nothing
+const haptic=()=>{try{if(navigator.userActivation?.hasBeenActive) navigator.vibrate?.(8);$('hap').click()}catch{}};
+const tabScroll={};
+function showTab(t){
+  const was=document.querySelector('section.on')?.id;
+  if(was===t){scrollTo({top:0,behavior:'smooth'});return} // tapping the current tab scrolls to top, like iOS
+  tabScroll[was]=scrollY; haptic();
+  document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));
+  document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id===t));$('planBtn').hidden=t!=='today';
+  scrollTo(0,tabScroll[t]||0); topbar()}
+function topbar(){
+  const sec=document.querySelector('section.on'); if(!sec) return;
+  $('topTitle').textContent=sec.id==='today'?$('dateLabel').textContent:sec.querySelector('h1')?.firstChild?.textContent.trim()||'';
+  $('topbar').classList.toggle('show',scrollY>(sec.id==='today'?70:50))}
+addEventListener('scroll',topbar,{passive:true});
+function closeSheet(){
+  const d=$('sheet'); if(!d.open||d.classList.contains('closing')) return;
+  if(calm.matches){d.close();return}
+  d.classList.add('closing'); d.style.transform='';
+  setTimeout(()=>{d.classList.remove('closing');d.close()},270)}
+$('sheet').addEventListener('cancel',e=>{e.preventDefault();closeSheet()});
+// drag the sheet down to dismiss (only when its content is scrolled to the top)
+{let y0=null,dy=0,t0=0;const d=$('sheet');
+  d.addEventListener('touchstart',e=>{if(innerWidth>=760||d.scrollTop>0) return;y0=e.touches[0].clientY;dy=0;t0=Date.now()},{passive:true});
+  d.addEventListener('touchmove',e=>{if(y0===null) return;dy=Math.max(0,e.touches[0].clientY-y0);
+    if(dy>6){e.preventDefault();d.style.transition='none';d.style.transform=`translateY(${dy}px)`}},{passive:false});
+  d.addEventListener('touchend',()=>{if(y0===null) return;y0=null;
+    const fast=dy/(Date.now()-t0)>.5;
+    d.style.transition='transform .4s cubic-bezier(.32,.72,0,1)';
+    if(dy>120||(fast&&dy>40)){haptic();d.style.transform='translateY(100%)';setTimeout(()=>{d.close();d.style.transform='';d.style.transition=''},300)}
+    else d.style.transform=''})}
+function slideIn(dir){
+  if(calm.matches) return;
+  for(const el of [$('timeline'),$('dayNote')]) el.animate([{transform:`translateX(${dir*32}px)`,opacity:0},{transform:'none',opacity:1}],{duration:320,easing:'cubic-bezier(.32,.72,0,1)'})}
+// swipe left/right on the timeline to move between days
+{let x0=null,y0=0;const tl=$('timeline').parentElement;
+  tl.addEventListener('touchstart',e=>{x0=e.touches[0].clientX;y0=e.touches[0].clientY},{passive:true});
+  tl.addEventListener('touchend',e=>{if(x0===null) return;const dx=e.changedTouches[0].clientX-x0,dy=e.changedTouches[0].clientY-y0;x0=null;
+    if(Math.abs(dx)>70&&Math.abs(dx)>2*Math.abs(dy)){haptic();shift(dx<0?1:-1)}},{passive:true})}
 function busy(btn,fn){return async(...a)=>{if(btn.disabled) return;const h=btn.innerHTML;btn.disabled=true;btn.innerHTML='<span class="dots"><span></span><span></span><span></span></span>';
   crumb(`started ${fn.name||'action'}`);
   try{await fn(...a)}catch(e){toast(e.message,1)}finally{btn.disabled=false;btn.innerHTML=h;crumb('done')}}}
 $('nav').onclick=e=>{const b=e.target.closest('[data-tab]'); if(b) showTab(b.dataset.tab)};
-const go=iso=>{cur=iso;loadDay()};
+const go=async iso=>{const dir=iso>cur?1:-1;if(iso===cur) return;cur=iso;await loadDay();slideIn(dir);topbar()};
 const shift=n=>{const d=new Date(cur+'T12:00');d.setDate(d.getDate()+n);go(d.toLocaleDateString('en-CA'))};
 $('prev').onclick=()=>shift(-7); $('next').onclick=()=>shift(7);
 $('week').onclick=e=>{const b=e.target.closest('[data-d]'); if(b) go(b.dataset.d)};
@@ -728,7 +803,7 @@ $('planBtn').onclick=async()=>{
   await busy($('planBtn'),planDay)(); $('thinking').innerHTML='';
 };
 $('timeline').onclick=e=>{
-  const done=e.target.closest('[data-done]'); if(done){e.stopPropagation();return feedback(+done.dataset.done,'done')}
+  const done=e.target.closest('[data-done]'); if(done){e.stopPropagation();const i=done.dataset.done;feedback(+i,'done');haptic();$('timeline').querySelector(`[data-done="${i}"]`)?.classList.add('pop');return}
   const g=e.target.closest('[data-gap]'); if(g){const[s,en]=g.dataset.gap.split('-');return busy(g,fillGap)(s,en)}
   const li=e.target.closest('.ev'); if(li) openSheet(li.dataset.i!==undefined?'i':'f',+(li.dataset.i??li.dataset.f));
 };
