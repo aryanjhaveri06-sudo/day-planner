@@ -259,7 +259,7 @@ details.setup li{margin:6px 0}
   <p class="glabel">Connections</p>
   <div class="group">
     <div class="field"><label>Gemini key</label><input id="s_geminiKey" type="password" autocomplete="off" placeholder="Paste key"></div>
-    <div class="field"><label>Gemini model</label><input id="s_model" placeholder="Auto (newest Flash)"></div>
+    <div class="field"><label>Gemini model</label><input id="s_model" placeholder="Auto (picks the least busy)"></div>
     <div class="field"><button class="btn sm" id="testBtn">Test connection</button><span class="mute" style="flex:1">Checks your key and model, and shows Google's exact reply.</span></div>
     <div class="field col" id="testOut" hidden></div>
     <div class="field"><label>Google client ID</label><input id="s_clientId" placeholder="…apps.googleusercontent.com"></div>
@@ -278,7 +278,7 @@ details.setup li{margin:6px 0}
 <div id="toast"></div>
 
 <script>
-const VER='2026-11-16.2';
+const VER='2026-11-16.3';
 // Crash breadcrumbs: written synchronously so they survive iOS killing the page mid-action.
 const crumb=(step,extra={})=>{try{localStorage.setItem('planner-debug',JSON.stringify({step,at:new Date().toLocaleTimeString(),ver:VER,...extra}))}catch{}};
 // ---------- state ----------
@@ -287,6 +287,7 @@ const DEF={settings:{geminiKey:'',model:'',clientId:''},
   memory:[],plans:{},journal:{},quizzes:[],learned:[],podcasts:{}};
 let S; try{S=JSON.parse(localStorage.getItem('planner'))||{}}catch{S={}}
 for(const k in DEF) S[k]=typeof DEF[k]==='object'&&!Array.isArray(DEF[k])?{...DEF[k],...S[k]}:(S[k]??DEF[k]);
+if(!S.settings.autoFixed){S.settings.model='';S.settings.autoFixed=1}
 const save=()=>{try{localStorage.setItem('planner',JSON.stringify(S))}catch(e){toast('Could not save: '+e.message,1)}};
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -338,23 +339,24 @@ let lastGemini=null; // raw details of the last call, shown by Test connection
 async function gemini(prompt){
   if(!S.settings.geminiKey){showTab('you');throw new Error('Add your Gemini key under You → Connections first.')}
   modelList??=await listModels();
-  const pref=S.settings.model.trim(), order=[...new Set([pref,...modelList].filter(Boolean))].slice(0,2);
+  const pref=S.settings.model.trim(), order=[...new Set([pref,...modelList].filter(Boolean))].slice(0,3);
   const body=JSON.stringify({contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}});
   let last='';
-  // ponytail: at most 2 models x 1 retry; each failed call still costs free quota, so never fan out further
+  // ponytail: at most 3 models, busy/slow ones are skipped not retried; each failed call costs free quota
   for(const model of order){
     for(let attempt=0;attempt<2;attempt++){
       crumb(`waiting for ${model} (try ${attempt+1})`);
       let r;
       try{r=await fetch(`${GAPI}models/${encodeURIComponent(model)}:generateContent`,
-        {method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':S.settings.geminiKey},body,signal:AbortSignal.timeout(90000)})}
-      catch(e){throw new Error(e.name==='TimeoutError'?'Gemini took longer than 90 seconds. Try again.':'Network problem reaching Gemini. Check your connection.')}
+        {method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':S.settings.geminiKey},body,signal:AbortSignal.timeout(45000)})}
+      catch(e){if(e.name!=='TimeoutError') throw new Error('Network problem reaching Gemini. Check your connection.');
+        last=`${model}: no reply in 45s`;lastGemini={model,status:'timeout',msg:'',quota:''};break} // slow = busy: next model
       const d=await r.json().catch(()=>({}));
       const msg=d.error?.message||'', lim=r.status===429?limitInfo(d):null;
       lastGemini={model,status:r.status,msg,quota:lim?.ids||''};
       crumb(`got ${r.status} from ${model}`,{raw:JSON.stringify(d).slice(0,3000)});
       if(r.ok){
-        if(!pref){S.settings.model=model;$('s_model').value=model;save()} // remember the auto pick
+        if(pref&&model!==pref) toast(`${pref} is busy, so ${model} answered this one.`);
         const c=d.candidates?.[0];
         if(!c?.content) throw new Error(`Gemini returned no answer (${c?.finishReason||d.promptFeedback?.blockReason||'empty'}). Try again.`);
         return parseJSON(c.content.parts.map(p=>p.text||'').join(''));
@@ -367,7 +369,7 @@ async function gemini(prompt){
         if(!lim.daily&&lim.wait&&lim.wait<=30&&attempt===0){toast(`Free-tier speed limit, waiting ${Math.ceil(lim.wait)}s…`);await sleep(lim.wait*1000+500);continue}
         if(lim.daily) break; // this model's daily allowance is gone; the other model has its own
         throw new Error(`Gemini's free per-minute limit was hit. Wait a minute and try again. (${last})`)}
-      if(r.status>=500){if(attempt===0){await sleep(3000);continue} break} // busy: one retry, then the other model
+      if(r.status>=500) break; // busy: go straight to the next model, it has its own capacity
       if(r.status===400&&/api key/i.test(msg)) throw new Error('Google says this API key is not valid. Paste it again under You → Connections.');
       if(r.status===403) throw new Error(`Google refused this key (${msg}). Check the key in AI Studio.`);
       throw new Error('Gemini: '+last);
@@ -738,7 +740,7 @@ $('testBtn').onclick=busy($('testBtn'),async()=>{
   lines.length=0; out.innerHTML='Testing…'; out.hidden=false;
   if(!S.settings.geminiKey.trim()) return show(0,'No Gemini key saved on this device. Paste it above.');
   try{modelList=await listModels();show(1,`Key works. Models available: ${modelList.join(', ')}`)}catch(e){return show(0,e.message)}
-  try{const t0=Date.now();await gemini('Return ONLY JSON: {"ok":true}');show(1,`${S.settings.model} answered in ${((Date.now()-t0)/1000).toFixed(1)}s. Planning should work.`)}
+  try{const t0=Date.now();await gemini('Return ONLY JSON: {"ok":true}');show(1,`${lastGemini.model} answered in ${((Date.now()-t0)/1000).toFixed(1)}s. Planning should work.`)}
   catch(e){show(0,e.message);if(lastGemini)show(0,`Google's reply: model ${lastGemini.model}, HTTP ${lastGemini.status}${lastGemini.quota?', limit '+lastGemini.quota:''}`)}
 });
 for(const [grp,pre] of [['settings','s_'],['profile','p_']]) for(const k in S[grp]){const el=$(pre+k); if(!el) continue; el.value=S[grp][k];
