@@ -248,6 +248,8 @@ details.setup li{margin:6px 0}
     <div class="field col"><label>Interests &amp; topics</label><textarea id="p_interests" placeholder="e.g. psychology, investing basics, Spanish, design"></textarea></div>
     <div class="field col"><label>Goals for this season</label><textarea id="p_goals" placeholder="e.g. hold a 10-minute Spanish conversation by March"></textarea></div>
     <div class="field col"><label>Preferences</label><textarea id="p_prefs" placeholder="e.g. sharpest in the morning, prefer podcasts over video, no screens after 10pm"></textarea></div>
+    <div class="field"><label>Plan started</label><input id="p_planStart" type="date"></div>
+    <div class="field col"><label>Life plan: paste a longer plan or blueprint here. The AI follows it every day.</label><textarea id="p_plan" rows="8" placeholder="e.g. Monday: networking. Tuesday: finance… Daily: 30 min reading, 10 min meditation…"></textarea></div>
   </div>
   <div class="btnrow" style="margin:-8px 0 22px"><button class="btn pri" id="interviewBtn">✨ Let the AI interview me</button></div>
   <div id="interview"></div>
@@ -276,12 +278,12 @@ details.setup li{margin:6px 0}
 <div id="toast"></div>
 
 <script>
-const VER='2026-11-16.1';
+const VER='2026-11-16.2';
 // Crash breadcrumbs: written synchronously so they survive iOS killing the page mid-action.
 const crumb=(step,extra={})=>{try{localStorage.setItem('planner-debug',JSON.stringify({step,at:new Date().toLocaleTimeString(),ver:VER,...extra}))}catch{}};
 // ---------- state ----------
 const DEF={settings:{geminiKey:'',model:'',clientId:''},
-  profile:{name:'',commuteMin:20,wake:'07:00',sleep:'23:00',routine:'',interests:'',goals:'',prefs:''},
+  profile:{name:'',commuteMin:20,wake:'07:00',sleep:'23:00',routine:'',interests:'',goals:'',prefs:'',plan:'',planStart:''},
   memory:[],plans:{},journal:{},quizzes:[],learned:[],podcasts:{}};
 let S; try{S=JSON.parse(localStorage.getItem('planner'))||{}}catch{S={}}
 for(const k in DEF) S[k]=typeof DEF[k]==='object'&&!Array.isArray(DEF[k])?{...DEF[k],...S[k]}:(S[k]??DEF[k]);
@@ -388,7 +390,7 @@ Day runs ${p.wake}–${p.sleep}. One-way commute ≈ ${p.commuteMin} min.
 Interests: ${p.interests||'-'}
 Goals: ${p.goals||'-'}
 Preferences: ${p.prefs||'-'}
-WHAT THE PLANNER HAS LEARNED (oldest→newest, newer wins on conflict):
+${p.plan?`LIFE PLAN (follow it: today's lesson theme, daily habits and current phase come from here)${p.planStart?`. Today is day ${Math.floor((new Date(cur+'T12:00')-new Date(p.planStart+'T12:00'))/864e5)+1} of the plan`:''}:\n${p.plan}\n`:''}WHAT THE PLANNER HAS LEARNED (oldest→newest, newer wins on conflict):
 ${S.memory.slice(-60).join('\n')||'- nothing yet'}
 RECENTLY CONSUMED (don't repeat; build on these):
 ${S.learned.slice(-25).map(l=>`- ${l.date}: ${l.title}${l.resource?' — '+l.resource.title:''}`).join('\n')||'- nothing yet'}
@@ -747,7 +749,7 @@ $('memory').value=S.memory.join('\n');
 $('memory').onchange=e=>{S.memory=e.target.value.split('\n').filter(l=>l.trim());save()};
 $('origin').textContent=location.origin;
 $('exportBtn').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify({...S,settings:{...S.settings,geminiKey:''}},null,1)],{type:'application/json'}));a.download=`planner-backup-${today()}.json`;a.click()};
-$('importIn').onchange=async e=>{try{const d=JSON.parse(await e.target.files[0].text());const key=S.settings.geminiKey;S={...S,...d};S.settings.geminiKey||=key;save();location.reload()}catch{toast('That is not a valid backup file.',1)}};
+$('importIn').onchange=async e=>{try{const d=JSON.parse(await e.target.files[0].text());const key=S.settings.geminiKey;for(const k in d)S[k]=S[k]&&typeof S[k]==='object'&&!Array.isArray(S[k])?{...S[k],...d[k]}:d[k];S.settings.geminiKey||=key;save();location.reload()}catch{toast('That is not a valid backup file.',1)}};
 setInterval(()=>cur===today()&&$('today').classList.contains('on')&&!$('sheet').open&&renderDay(),60000); // keep "now" highlight current
 $('verLabel').textContent=VER;
 renderQuizSrc(); loadDay();
