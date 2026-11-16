@@ -258,7 +258,7 @@ details.setup li{margin:6px 0}
   <div class="group">
     <div class="field"><label>Gemini key</label><input id="s_geminiKey" type="password" autocomplete="off" placeholder="Paste key"></div>
     <div class="field"><label>Gemini model</label><input id="s_model" placeholder="Auto (newest Flash)"></div>
-    <div class="field"><button class="btn sm" id="testBtn">Test connection</button><span class="mute" style="flex:1">Checks your key, model and web search step by step.</span></div>
+    <div class="field"><button class="btn sm" id="testBtn">Test connection</button><span class="mute" style="flex:1">Checks your key and model, and shows Google's exact reply.</span></div>
     <div class="field col" id="testOut" hidden></div>
     <div class="field"><label>Google client ID</label><input id="s_clientId" placeholder="…apps.googleusercontent.com"></div>
     <details class="setup"><summary>How to set these up</summary><ol>
@@ -276,7 +276,7 @@ details.setup li{margin:6px 0}
 <div id="toast"></div>
 
 <script>
-const VER='2026-11-15.5';
+const VER='2026-11-16.1';
 // Crash breadcrumbs: written synchronously so they survive iOS killing the page mid-action.
 const crumb=(step,extra={})=>{try{localStorage.setItem('planner-debug',JSON.stringify({step,at:new Date().toLocaleTimeString(),ver:VER,...extra}))}catch{}};
 // ---------- state ----------
@@ -309,8 +309,8 @@ const look=it=>it.src==='gcal'?['📅','#B4B4BA']:it.src==='routine'?[/commut|tr
 
 // ---------- Gemini ----------
 const GAPI='https://generativelanguage.googleapis.com/v1beta/';
-// Ask Google which models this key can use and pick the newest general-purpose Flash.
-// Model names churn and older ones get closed to new accounts, so never hardcode one.
+// Free-tier facts (Google pricing page, Nov 2026): web-search grounding is NOT free on any Gemini 3.x model,
+// and Flash-Lite gets ~25x the daily requests of Flash. So: no search, Lite first, and very few calls per tap.
 let modelList=null; // ranked Flash models this key can use, fetched once per session
 async function listModels(){
   const r=await fetch(GAPI+'models?pageSize=1000',{headers:{'x-goog-api-key':S.settings.geminiKey}}), d=await r.json();
@@ -318,49 +318,61 @@ async function listModels(){
   const ver=n=>parseFloat(n.match(/gemini-(\d+(?:\.\d+)?)/)?.[1]||0);
   const ok=(d.models||[]).filter(m=>m.supportedGenerationMethods?.includes('generateContent')).map(m=>m.name.replace('models/',''))
     .filter(n=>/^gemini-.*flash/.test(n)&&!/image|tts|audio|live|embed|thinking/.test(n));
-  // full Flash before Lite, stable before preview, newest first, then shortest name
-  const rank=n=>[/preview|exp/.test(n)?1:0,/lite/.test(n)?1:0,-ver(n),n.length];
+  // stable before preview, Lite before full Flash (bigger free allowance), newest first, then shortest name
+  const rank=n=>[/preview|exp/.test(n)?1:0,/lite/.test(n)?0:1,-ver(n),n.length];
   ok.sort((a,b)=>{const x=rank(a),y=rank(b);return x[0]-y[0]||x[1]-y[1]||x[2]-y[2]||x[3]-y[3]});
   if(!ok.length) throw new Error('No Flash model is available for this API key.');
   return ok;
 }
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-async function gemini(prompt,{search=false}={}){
+// Turn Google's 429 details into: is it the daily cap, and how long does it say to wait?
+function limitInfo(d){
+  const det=d.error?.details||[];
+  const ids=det.flatMap(x=>x.violations||[]).map(v=>v.quotaId||'').join(' ');
+  const wait=parseFloat(det.find(x=>x.retryDelay)?.retryDelay)||0;
+  return {daily:/PerDay/i.test(ids), wait, ids};
+}
+let lastGemini=null; // raw details of the last call, shown by Test connection
+async function gemini(prompt){
   if(!S.settings.geminiKey){showTab('you');throw new Error('Add your Gemini key under You → Connections first.')}
   modelList??=await listModels();
-  const pref=S.settings.model.trim(), order=[...new Set([pref,...modelList].filter(Boolean))].slice(0,4);
-  const body={contents:[{role:'user',parts:[{text:prompt}]}]};
-  // google_search grounding can't be combined with JSON mode, so search calls parse JSON out of text
-  if(search) body.tools=[{google_search:{}}]; else body.generationConfig={responseMimeType:'application/json'};
-  let lastMsg='',quota=false;
-  for(const [k,model] of order.entries()){
+  const pref=S.settings.model.trim(), order=[...new Set([pref,...modelList].filter(Boolean))].slice(0,2);
+  const body=JSON.stringify({contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}});
+  let last='';
+  // ponytail: at most 2 models x 1 retry; each failed call still costs free quota, so never fan out further
+  for(const model of order){
     for(let attempt=0;attempt<2;attempt++){
       crumb(`waiting for ${model} (try ${attempt+1})`);
       let r;
       try{r=await fetch(`${GAPI}models/${encodeURIComponent(model)}:generateContent`,
-        {method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':S.settings.geminiKey},body:JSON.stringify(body),signal:AbortSignal.timeout(90000)})}
+        {method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':S.settings.geminiKey},body,signal:AbortSignal.timeout(90000)})}
       catch(e){throw new Error(e.name==='TimeoutError'?'Gemini took longer than 90 seconds. Try again.':'Network problem reaching Gemini. Check your connection.')}
       const d=await r.json().catch(()=>({}));
+      const msg=d.error?.message||'', lim=r.status===429?limitInfo(d):null;
+      lastGemini={model,status:r.status,msg,quota:lim?.ids||''};
       crumb(`got ${r.status} from ${model}`,{raw:JSON.stringify(d).slice(0,3000)});
       if(r.ok){
-        if(!S.settings.model.trim()){S.settings.model=model;$('s_model').value=model;save()} // remember the auto pick
-        else if(model!==pref) toast(`${pref} is busy, so ${model} answered this one.`);
-        return parseJSON((d.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join(''));
+        if(!pref){S.settings.model=model;$('s_model').value=model;save()} // remember the auto pick
+        const c=d.candidates?.[0];
+        if(!c?.content) throw new Error(`Gemini returned no answer (${c?.finishReason||d.promptFeedback?.blockReason||'empty'}). Try again.`);
+        return parseJSON(c.content.parts.map(p=>p.text||'').join(''));
       }
-      lastMsg=d.error?.message||String(r.status);
-      if(r.status===404||/no longer available|not found|deprecat|not supported/i.test(lastMsg)){ // retired: forget it, try the next
+      last=`${model}: ${r.status} ${msg}`;
+      if(r.status===404||/no longer available|not found|deprecat|not supported/i.test(msg)){ // retired: forget it, try the next
         modelList=modelList.filter(m=>m!==model);
         if(model===pref){S.settings.model='';$('s_model').value='';save()} break}
-      if(r.status===429||/quota|exhausted|rate limit/i.test(lastMsg)){quota=true;break} // usage limit: retrying this model won't help, try the next
-      if(r.status>=500||/high demand|overloaded|unavailable|try again/i.test(lastMsg)){ // busy: wait once, then fall back
-        if(attempt===0){await sleep(2000*(k+1));continue} break}
-      throw new Error('Gemini: '+lastMsg);
+      if(lim){
+        if(!lim.daily&&lim.wait&&lim.wait<=30&&attempt===0){toast(`Free-tier speed limit, waiting ${Math.ceil(lim.wait)}s…`);await sleep(lim.wait*1000+500);continue}
+        if(lim.daily) break; // this model's daily allowance is gone; the other model has its own
+        throw new Error(`Gemini's free per-minute limit was hit. Wait a minute and try again. (${last})`)}
+      if(r.status>=500){if(attempt===0){await sleep(3000);continue} break} // busy: one retry, then the other model
+      if(r.status===400&&/api key/i.test(msg)) throw new Error('Google says this API key is not valid. Paste it again under You → Connections.');
+      if(r.status===403) throw new Error(`Google refused this key (${msg}). Check the key in AI Studio.`);
+      throw new Error('Gemini: '+last);
     }
   }
-  // Free-tier keys run out of web-search allowance first; a plan without search is better than no plan.
-  if(quota&&search){toast('Web search allowance used up, so this was planned without it. Use "find" links to locate resources.');return gemini(prompt,{search:false})}
-  if(quota) throw new Error('Your Gemini key has hit its usage limit. On the free tier it resets daily; adding billing in Google AI Studio removes this. ('+lastMsg+')');
-  throw new Error('Gemini is overloaded right now. Wait a minute and try again. ('+lastMsg+')');
+  if(/429/.test(last)) throw new Error(`Today's free Gemini allowance is used up. It resets at midnight Pacific time. (${last})`);
+  throw new Error(`Gemini is busy right now. Wait a minute and try again. (${last})`);
 }
 function parseJSON(t){
   const fence=t.match(/```(?:json)?\s*([\s\S]*?)```/); if(fence) t=fence[1];
@@ -537,7 +549,7 @@ const BLOCK_SCHEMA=`{"start":"HH:MM","end":"HH:MM","type":"learn|podcast|video|r
 const RULES=`- Be humane: meals, breaks, movement, social time and a wind-down are part of a good day. Not every slot is learning.
 - Put deep learning where energy is likely highest and light content into short gaps. Match resource length to block length.
 - Rotate topics across the week toward the stated goals, build on what was consumed recently, and respect liked/disliked patterns.
-- For learn/podcast/video/reading/practice blocks, recommend a SPECIFIC real resource (use search to verify it exists; give a url only when sure, else "").`;
+- For learn/podcast/video/reading/practice blocks, recommend a SPECIFIC real resource that you are confident exists (well-known books, shows, channels, courses); leave url "" (the app links a search).`;
 const cleanBlocks=bs=>(Array.isArray(bs)?bs:[]).filter(b=>/^\d\d:\d\d$/.test(b.start)&&/^\d\d:\d\d$/.test(b.end)&&toMin(b.end)>toMin(b.start)).map(b=>({...b,done:false}));
 async function planDay(){
   const fixed=fixedItems(),wd=new Date(cur+'T12:00').toLocaleDateString('en',{weekday:'long'});
@@ -551,7 +563,7 @@ RULES
 - Your blocks plus the fixed commitments must account for EVERY minute from ${S.profile.wake} to ${S.profile.sleep}, with no gaps.
 ${RULES}
 - Passive fixed items (commute, cardio, chores) may get an extra block with "overlay":true at the same times, e.g. a podcast during the commute.
-Return ONLY JSON: {"note":"one warm sentence on today's theme","blocks":[${BLOCK_SCHEMA}]}`,{search:true});
+Return ONLY JSON: {"note":"one warm sentence on today's theme","blocks":[${BLOCK_SCHEMA}]}`);
   const blocks=cleanBlocks(d.blocks);
   if(!blocks.length) throw new Error('The AI sent back an empty plan. Try again.');
   (S.plans[cur]?.blocks||[]).forEach(dropEvent); slotOpts={};
@@ -562,7 +574,7 @@ async function fillGap(start,end){
   const d=await gemini(`${context()}
 Fill the free time ${start}-${end} on ${cur} with 1-3 blocks that exactly cover it.
 ${RULES}
-Return ONLY JSON: {"blocks":[${BLOCK_SCHEMA}]}`,{search:true});
+Return ONLY JSON: {"blocks":[${BLOCK_SCHEMA}]}`);
   const add=cleanBlocks(d.blocks).filter(b=>toMin(b.start)>=toMin(start)&&toMin(b.end)<=toMin(end));
   if(!add.length) throw new Error('The AI had no suggestions for that gap. Try again.');
   (S.plans[cur]??={note:'',blocks:[]}).blocks.push(...add); save(); renderDay();
@@ -571,8 +583,8 @@ async function altSlot(i){
   const b=S.plans[cur].blocks[i];
   const d=await gemini(`${context()}
 The user wants alternatives for the ${b.start}-${b.end} slot on ${cur} (currently: ${b.type} "${b.title}"${b.resource?' — '+b.resource.title:''}).
-Give 3 different options that fit exactly ${toMin(b.end)-toMin(b.start)} minutes, varied in topic and format, matching their tastes. Real, verified resources.
-Return ONLY JSON: {"options":[${BLOCK_SCHEMA}]} with start "${b.start}" and end "${b.end}"${b.overlay?' and overlay true':''}.`,{search:true});
+Give 3 different options that fit exactly ${toMin(b.end)-toMin(b.start)} minutes, varied in topic and format, matching their tastes. Only well-known resources you are confident exist.
+Return ONLY JSON: {"options":[${BLOCK_SCHEMA}]} with start "${b.start}" and end "${b.end}"${b.overlay?' and overlay true':''}.`);
   slotOpts[i]=cleanBlocks(d.options);
 }
 function feedback(i,act){
@@ -590,18 +602,29 @@ function renderPodcast(){
   $('commute').innerHTML=p?`<div class="ep">${esc(p.title)}</div><div class="show">${esc(p.show)} · ~${esc(p.minutes)} min</div><div class="why">${esc(p.why)}</div>
     <div class="btnrow"><a class="btn pri sm" target="_blank" rel="noopener" href="${url?esc(url):`https://www.google.com/search?q=${encodeURIComponent(p.show+' '+p.title)}`}">▶ Listen</a>
     <button class="btn sm" id="podBtn">↻ New</button><button class="btn sm" id="podMore">More options</button>
-    <button class="btn sm" data-pod="up" aria-label="Liked">👍</button><button class="btn sm" data-pod="down" aria-label="Disliked">👎</button></div>`
+    <button class="btn sm" data-pod="heard">✓ Listened</button><button class="btn sm" data-pod="up" aria-label="Liked">👍</button><button class="btn sm" data-pod="down" aria-label="Disliked">👎</button></div>`
     :`<p class="mute" style="margin:0">A ${S.profile.commuteMin}-minute episode picked for you, different every day.</p>
     <div class="btnrow"><button class="btn pri sm" id="podBtn">Pick today's episode</button><button class="btn sm" id="podMore">Show 3 options</button></div>`;
   $('podBtn').onclick=busy($('podBtn'),podcastPick); $('podMore').onclick=busy($('podMore'),podcastMore);
 }
+// The AI only picks topics; real episodes of the right length come from Apple's free podcast catalogue.
 async function suggestPodcast(n){
-  const past=Object.values(S.podcasts).slice(-30).map(p=>`${p.show}: ${p.title}`).join('; ');
+  const past=new Set(Object.values(S.podcasts).map(p=>p.title));
   const d=await gemini(`${context()}
-Suggest ${n} real podcast episode(s) about ${S.profile.commuteMin} minutes long (±5) for the user's commute on ${cur}. Use search to verify each episode exists.
-Vary topics day to day toward their interests and goals. Never suggest any of these already-suggested episodes: ${past||'none'}.
-Return ONLY JSON: {"episodes":[{"show":"","title":"exact episode title","minutes":0,"url":"https://… or empty","why":"one line on why it fits today"}]}`,{search:true});
-  return d.episodes||[];
+Pick 4 different podcast search topics for the user's ${S.profile.commuteMin}-minute commute on ${cur}, toward their interests and goals; vary them day to day.
+Each topic is 1-3 words that would find good episodes in a podcast search (e.g. "behavioral economics", "stoicism").
+Recently suggested episodes (avoid repeating their themes too often): ${[...past].slice(-15).join('; ')||'none'}.
+Return ONLY JSON: {"topics":[{"term":"","why":"one line on why it fits today"}]}`);
+  const lo=(S.profile.commuteMin-5)*60000, hi=(S.profile.commuteMin+8)*60000, picks=[];
+  for(const t of (d.topics||[]).sort(()=>Math.random()-.5)){
+    const r=await fetch(`https://itunes.apple.com/search?media=podcast&entity=podcastEpisode&limit=50&term=${encodeURIComponent(t.term)}`).then(r=>r.json()).catch(()=>({}));
+    const eps=(r.results||[]).filter(e=>e.trackTimeMillis>=lo&&e.trackTimeMillis<=hi&&!past.has(e.trackName)&&!picks.some(p=>p.title===e.trackName));
+    const e=eps[Math.floor(Math.random()*Math.min(eps.length,10))];
+    if(e) picks.push({show:e.collectionName,title:e.trackName,minutes:Math.round(e.trackTimeMillis/60000),url:e.trackViewUrl,why:t.why,desc:(e.description||'').slice(0,600)});
+    if(picks.length>=n) break;
+  }
+  if(!picks.length) throw new Error(`Couldn't find a ${S.profile.commuteMin}-minute episode on those topics. Tap again for new topics.`);
+  return picks;
 }
 let podChoices=[];
 async function podcastPick(){const [e]=await suggestPodcast(1); if(e){S.podcasts[cur]=e;save();$('podOpts').innerHTML='';renderPodcast()}}
@@ -610,7 +633,8 @@ async function podcastMore(){
   $('podOpts').innerHTML=podChoices.map((e,k)=>`<button class="opt" data-podk="${k}"><b>${esc(e.title)}</b><small>${esc(e.show)} · ${esc(e.minutes)} min</small></button>`).join('');
 }
 $('podOpts').onclick=e=>{const k=e.target.closest('[data-podk]')?.dataset.podk; if(k!==undefined){S.podcasts[cur]=podChoices[k];save();$('podOpts').innerHTML='';renderPodcast()}};
-$('commute').onclick=e=>{const v=e.target.dataset.pod,p=S.podcasts[cur]; if(v&&p){remember(`${v==='up'?'Liked':'Disliked'} podcast "${p.title}" (${p.show})`);toast(v==='up'?'Got it. More like this.':'Got it. Less like this.')}};
+$('commute').onclick=e=>{const v=e.target.dataset.pod,p=S.podcasts[cur]; if(v==='heard'&&p){if(!S.learned.some(l=>l.resource?.title===p.title)){S.learned.push({date:cur,title:p.title,type:'podcast',resource:{title:p.title,creator:p.show,url:p.url,minutes:p.minutes,desc:p.desc},detail:p.why});save();renderQuizSrc()}toast('Added to Quiz.');return}
+  if(v&&p){remember(`${v==='up'?'Liked':'Disliked'} podcast "${p.title}" (${p.show})`);toast(v==='up'?'Got it. More like this.':'Got it. Less like this.')}};
 
 // ---------- quiz ----------
 let quiz=null;
@@ -626,10 +650,10 @@ async function makeQuiz(i){
   $('quizBox').innerHTML=`<div class="thinking"><span class="dots"><span></span><span></span><span></span></span>Reading up on “${esc(r.title||l.title)}”…</div>`;
   try{
     const d=await gemini(`Create a 5-question multiple-choice quiz on the SPECIFIC content the user consumed, not the general topic.
-Content: ${r.title||l.title}${r.creator?' by '+r.creator:''} ${safeUrl(r.url)} (${l.type}; planner note: ${l.detail||''}).
-Use search to look up what this specific piece actually covers (episode notes, transcript, summary, chapter list). Mix recall and understanding.
+Content: ${r.title||l.title}${r.creator?' by '+r.creator:''} ${safeUrl(r.url)} (${l.type}; planner note: ${l.detail||''}).${r.desc?`\nEpisode description: ${r.desc}`:''}
+Base questions on what this specific piece covers (use the description if given; otherwise what you know of it). Mix recall and understanding.
 ${S.quizzes.some(q=>q.title===(r.title||l.title))?'They have been quizzed on this before, so ask different questions.':''}
-Return ONLY JSON: {"questions":[{"q":"","choices":["","","",""],"answer":0,"why":"one-line explanation"}]}`,{search:true});
+Return ONLY JSON: {"questions":[{"q":"","choices":["","","",""],"answer":0,"why":"one-line explanation"}]}`);
     quiz={title:r.title||l.title,qs:(d.questions||[]).filter(q=>q.choices?.length),got:[]};
     renderQuiz();
   }catch(e){$('quizBox').innerHTML='';toast(e.message,1)}
@@ -712,8 +736,8 @@ $('testBtn').onclick=busy($('testBtn'),async()=>{
   lines.length=0; out.innerHTML='Testing…'; out.hidden=false;
   if(!S.settings.geminiKey.trim()) return show(0,'No Gemini key saved on this device. Paste it above.');
   try{modelList=await listModels();show(1,`Key works. Models available: ${modelList.join(', ')}`)}catch(e){return show(0,e.message)}
-  try{const t0=Date.now();await gemini('Return ONLY JSON: {"ok":true}');show(1,`${S.settings.model} answered in ${((Date.now()-t0)/1000).toFixed(1)}s`)}catch(e){return show(0,e.message)}
-  try{const t0=Date.now();await gemini('Use search to find today\'s date. Return ONLY JSON: {"date":""}',{search:true});show(1,`Web search works (${((Date.now()-t0)/1000).toFixed(1)}s). Planning should work.`)}catch(e){show(0,'Web search failed: '+e.message)}
+  try{const t0=Date.now();await gemini('Return ONLY JSON: {"ok":true}');show(1,`${S.settings.model} answered in ${((Date.now()-t0)/1000).toFixed(1)}s. Planning should work.`)}
+  catch(e){show(0,e.message);if(lastGemini)show(0,`Google's reply: model ${lastGemini.model}, HTTP ${lastGemini.status}${lastGemini.quota?', limit '+lastGemini.quota:''}`)}
 });
 for(const [grp,pre] of [['settings','s_'],['profile','p_']]) for(const k in S[grp]){const el=$(pre+k); if(!el) continue; el.value=S[grp][k];
   el.oninput=()=>{S[grp][k]=el.type==='number'?+el.value:grp==='settings'?el.value.trim():el.value;
