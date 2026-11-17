@@ -62,6 +62,9 @@ section{display:none;max-width:1180px;margin:0 auto}section.on{display:block}
 .eyebrow{color:var(--accent);font-weight:600;font-size:14px;letter-spacing:.01em}
 .dayhead h1{margin:0;font-size:32px;line-height:1.1;font-weight:700;position:relative;white-space:nowrap}
 .dayhead h1 input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.nowbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px;color:var(--mute);font-size:15px;font-variant-numeric:tabular-nums}
+.nowbar b{color:var(--text);font-weight:600}
+.nowbar button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
 .chips{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 .chip{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;background:var(--surface);box-shadow:var(--shadow);font-size:13.5px;font-weight:600;white-space:nowrap}
 .chip .dot{width:7px;height:7px;border-radius:50%;background:var(--ink3)}
@@ -235,7 +238,7 @@ dialog{overscroll-behavior:contain}
 <main>
 <section id="today" class="on">
   <div class="dayhead">
-    <div><div class="eyebrow" id="weekday"></div><h1 class="rounded"><span id="dateLabel"></span><input type="date" id="date" aria-label="Pick date"></h1></div>
+    <div><div class="eyebrow" id="weekday"></div><h1 class="rounded"><span id="dateLabel"></span><input type="date" id="date" aria-label="Pick date"></h1><div class="nowbar" id="nowbar"></div></div>
     <div class="chips"><button class="chip" id="gcalBtn"><span class="dot"></span><span>Calendar</span></button><button class="chip" id="pushBtn" hidden>Sync ↑</button></div>
   </div>
   <div class="todaygrid">
@@ -314,7 +317,7 @@ dialog{overscroll-behavior:contain}
 <div id="toast"></div>
 
 <script>
-const VER='2026-11-16.4';
+const VER='2026-11-17.1';
 // Crash breadcrumbs: written synchronously so they survive iOS killing the page mid-action.
 const crumb=(step,extra={})=>{try{localStorage.setItem('planner-debug',JSON.stringify({step,at:new Date().toLocaleTimeString(),ver:VER,...extra}))}catch{}};
 // ---------- state ----------
@@ -428,7 +431,7 @@ Day runs ${p.wake}–${p.sleep}. One-way commute ≈ ${p.commuteMin} min.
 Interests: ${p.interests||'-'}
 Goals: ${p.goals||'-'}
 Preferences: ${p.prefs||'-'}
-${p.plan?`LIFE PLAN (follow it: today's lesson theme, daily habits and current phase come from here)${p.planStart?`. Today is day ${Math.floor((new Date(cur+'T12:00')-new Date(p.planStart+'T12:00'))/864e5)+1} of the plan`:''}:\n${p.plan}\n`:''}WHAT THE PLANNER HAS LEARNED (oldest→newest, newer wins on conflict):
+${wxText(cur)}${p.plan?`LIFE PLAN (follow it: today's lesson theme, daily habits and current phase come from here)${p.planStart?`. Today is day ${Math.floor((new Date(cur+'T12:00')-new Date(p.planStart+'T12:00'))/864e5)+1} of the plan`:''}:\n${p.plan}\n`:''}WHAT THE PLANNER HAS LEARNED (oldest→newest, newer wins on conflict):
 ${S.memory.slice(-60).join('\n')||'- nothing yet'}
 RECENTLY CONSUMED (don't repeat; build on these):
 ${S.learned.slice(-25).map(l=>`- ${l.date}: ${l.title}${l.resource?' — '+l.resource.title:''}`).join('\n')||'- nothing yet'}
@@ -500,6 +503,39 @@ function gaps(items){
   if(t<z) out.push({start:fromMin(t),end:fromMin(z)}); return out.filter(g=>toMin(g.end)-toMin(g.start)>=5);
 }
 
+// ---------- time & weather (Open-Meteo: free, no key) ----------
+const WX={0:['☀️','Clear'],1:['🌤️','Mostly clear'],2:['⛅','Partly cloudy'],3:['☁️','Cloudy'],45:['🌫️','Fog'],48:['🌫️','Fog'],51:['🌦️','Drizzle'],53:['🌦️','Drizzle'],55:['🌦️','Drizzle'],56:['🌧️','Freezing drizzle'],57:['🌧️','Freezing drizzle'],61:['🌧️','Light rain'],63:['🌧️','Rain'],65:['🌧️','Heavy rain'],66:['🌧️','Freezing rain'],67:['🌧️','Freezing rain'],71:['🌨️','Light snow'],73:['🌨️','Snow'],75:['🌨️','Heavy snow'],77:['🌨️','Snow'],80:['🌦️','Showers'],81:['🌧️','Showers'],82:['⛈️','Heavy showers'],85:['🌨️','Snow showers'],86:['🌨️','Snow showers'],95:['⛈️','Thunderstorm'],96:['⛈️','Thunderstorm'],99:['⛈️','Thunderstorm']};
+const useF=/^en-(US|LR)|-(US|BS|BZ|KY|PW)$/.test(navigator.language||'');
+let wx=null,wxAt=0;
+async function loadWeather(){
+  const l=S.settings.loc; if(!l||(wx&&Date.now()-wxAt<30*60e3)) return renderNow();
+  try{const r=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${l.lat}&longitude=${l.lon}&current=temperature_2m,weather_code&hourly=precipitation_probability&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset&timezone=auto&forecast_days=16${useF?'&temperature_unit=fahrenheit':''}`);
+    if(r.ok){wx=await r.json();wxAt=Date.now()}}catch{}
+  renderNow();
+}
+function askLocation(){
+  if(!navigator.geolocation) return toast("This device can't share its location.",1);
+  navigator.geolocation.getCurrentPosition(p=>{S.settings.loc={lat:+p.coords.latitude.toFixed(2),lon:+p.coords.longitude.toFixed(2)};save();wxAt=0;loadWeather()},
+    ()=>toast('Location is blocked, so no weather. Allow it for this site in Settings → Privacy → Location.',1),{timeout:15000,maximumAge:36e5});
+}
+function dayWx(iso){
+  const i=wx?.daily?.time.indexOf(iso); if(i==null||i<0) return null; const d=wx.daily,u=useF?'F':'C';
+  const rain=wx.hourly.time.map((t,k)=>t.startsWith(iso)&&wx.hourly.precipitation_probability[k]>=50?t.slice(11,16):0).filter(Boolean);
+  return {emo:(WX[d.weather_code[i]]||['🌡️'])[0],label:(WX[d.weather_code[i]]||[,'Mixed'])[1],hi:Math.round(d.temperature_2m_max[i]),lo:Math.round(d.temperature_2m_min[i]),
+    pop:d.precipitation_probability_max[i],sunrise:d.sunrise[i].slice(11),sunset:d.sunset[i].slice(11),rain,u};
+}
+function wxText(iso){
+  const w=dayWx(iso); if(!w) return '';
+  return `WEATHER that day: ${w.label}, ${w.lo}–${w.hi}°${w.u}, rain chance up to ${w.pop}%${w.rain.length?` (rain likely around ${w.rain[0]}–${w.rain.at(-1)})`:''}. Sunrise ${w.sunrise}, sunset ${w.sunset}. Put outdoor things (walks, exercise outside) in dry daylight hours and choose indoor options when it's wet or cold.\n`;
+}
+function renderNow(){
+  const el=$('nowbar'); if(!el) return; const isToday=cur===today(),w=dayWx(cur),out=[];
+  if(w) out.push(`<span>${w.emo} ${isToday&&wx.current?`<b>${Math.round(wx.current.temperature_2m)}°</b> `:''}${w.label} · H ${w.hi}° L ${w.lo}°${w.pop>=20?` · 💧${w.pop}%`:''}</span>`);
+  else if(!S.settings.loc) out.push(`<button id="wxAsk">📍 Show weather</button>`);
+  const h=out.join('<span>·</span>'); if(el.innerHTML!==h) el.innerHTML=h;
+}
+document.addEventListener('click',e=>{if(e.target.closest('#wxAsk')) askLocation()});
+
 // ---------- render: today ----------
 function renderHead(){
   const d=new Date(cur+'T12:00');
@@ -509,7 +545,7 @@ function renderHead(){
   const mon=new Date(d); mon.setDate(d.getDate()-((d.getDay()+6)%7));
   $('week').innerHTML=[...Array(7)].map((_,k)=>{const x=new Date(mon);x.setDate(mon.getDate()+k);const iso=x.toLocaleDateString('en-CA');
     return `<button class="wd ${iso===cur?'sel':''} ${iso===today()?'today':''} ${S.plans[iso]?.blocks?.length?'has':''}" data-d="${iso}">${x.toLocaleDateString(undefined,{weekday:'narrow'})}<b>${x.getDate()}</b><i></i></button>`}).join('');
-  renderChips();
+  renderChips(); renderNow();
 }
 function renderChips(){
   $('gcalBtn').classList.toggle('live',!!token);
@@ -829,7 +865,8 @@ $('exportBtn').onclick=()=>{const a=document.createElement('a');a.href=URL.creat
 $('importIn').onchange=async e=>{try{const d=JSON.parse(await e.target.files[0].text());const key=S.settings.geminiKey;for(const k in d)S[k]=S[k]&&typeof S[k]==='object'&&!Array.isArray(S[k])?{...S[k],...d[k]}:d[k];S.settings.geminiKey||=key;save();location.reload()}catch{toast('That is not a valid backup file.',1)}};
 setInterval(()=>cur===today()&&$('today').classList.contains('on')&&!$('sheet').open&&renderDay(),60000); // keep "now" highlight current
 $('verLabel').textContent=VER;
-renderQuizSrc(); loadDay();
+renderQuizSrc(); loadDay(); loadWeather();
+document.addEventListener('visibilitychange',()=>document.hidden||loadWeather());
 // If the last AI action never reached 'done', the page was killed mid-action: say where.
 let lastRun=null; try{lastRun=JSON.parse(localStorage.getItem('planner-debug'))}catch{}
 if(lastRun&&lastRun.step!=='done'){
