@@ -301,7 +301,7 @@ dialog{overscroll-behavior:contain}
     <div class="field"><label>Gemini model</label><input id="s_model" placeholder="Auto (picks the least busy)"></div>
     <div class="field"><button class="btn sm" id="testBtn">Test connection</button><span class="mute" style="flex:1">Checks your key and model, and shows Google's exact reply.</span></div>
     <div class="field col" id="testOut" hidden></div>
-    <div class="field"><label>Google client ID</label><input id="s_clientId" placeholder="…apps.googleusercontent.com"></div>
+    <div class="field"><label>Google client ID</label><input id="s_clientId" placeholder="Built in — leave blank"></div>
     <details class="setup"><summary>How to set these up</summary><ol>
       <li>Gemini key: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> → Create key → paste above.</li>
       <li>Google Calendar: in <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a>, enable the Google Calendar API, create an OAuth client ID (Web application), add <code id="origin"></code> as an Authorized JavaScript origin, add the account as a test user, then paste the client ID above.</li>
@@ -317,7 +317,7 @@ dialog{overscroll-behavior:contain}
 <div id="toast"></div>
 
 <script>
-const VER='2026-11-17.1';
+const VER='2026-11-17.2';
 // Crash breadcrumbs: written synchronously so they survive iOS killing the page mid-action.
 const crumb=(step,extra={})=>{try{localStorage.setItem('planner-debug',JSON.stringify({step,at:new Date().toLocaleTimeString(),ver:VER,...extra}))}catch{}};
 // ---------- state ----------
@@ -441,9 +441,8 @@ ${S.quizzes.slice(-10).map(q=>`- ${q.title}: ${q.score}/${q.total}`).join('\n')|
 
 // ---------- Google Calendar ----------
 function connectGcal(){
-  if(!S.settings.clientId){showTab('you');return toast('Add your Google client ID under You → Connections first.',1)}
   if(!window.google?.accounts) return toast('Google sign-in is still loading. Try again in a second.',1);
-  tokenClient??=google.accounts.oauth2.initTokenClient({client_id:S.settings.clientId,
+  tokenClient??=google.accounts.oauth2.initTokenClient({client_id:S.settings.clientId||'613885814270-vvf6pgt14r5jej80ugq72p1ph2402b5n.apps.googleusercontent.com',
     scope:'https://www.googleapis.com/auth/calendar.events',
     callback:r=>{if(r.error) return toast('Calendar: '+r.error,1);token=r.access_token;loadDay();toast('Google Calendar connected')}});
   tokenClient.requestAccessToken();
