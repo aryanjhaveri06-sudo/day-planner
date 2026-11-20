@@ -66,6 +66,7 @@ section{display:none;max-width:1180px;margin:0 auto}section.on{display:block}
 .nowbar b{color:var(--text);font-weight:600}
 .nowbar button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
 .chips{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+@media(max-width:600px){.dayhead{flex-wrap:wrap;align-items:flex-start}.dayhead>.chips{justify-content:flex-start;width:100%}}
 .chip{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;background:var(--surface);box-shadow:var(--shadow);font-size:13.5px;font-weight:600;white-space:nowrap}
 .chip .dot{width:7px;height:7px;border-radius:50%;background:var(--ink3)}
 .chip.live .dot{background:var(--ok)}
@@ -239,7 +240,7 @@ dialog{overscroll-behavior:contain}
 <section id="today" class="on">
   <div class="dayhead">
     <div><div class="eyebrow" id="weekday"></div><h1 class="rounded"><span id="dateLabel"></span><input type="date" id="date" aria-label="Pick date"></h1><div class="nowbar" id="nowbar"></div></div>
-    <div class="chips"><button class="chip" id="gcalBtn"><span class="dot"></span><span>Calendar</span></button><button class="chip" id="pushBtn" hidden>Sync ↑</button></div>
+    <div class="chips"><button class="chip" id="gcalBtn"><span class="dot"></span><span>Calendar</span></button><button class="chip" id="pushBtn" hidden>Sync ↑</button><button class="chip" id="addBtn">＋ Event</button><button class="chip" id="clearBtn" hidden>Clear</button></div>
   </div>
   <div class="todaygrid">
     <div>
@@ -317,13 +318,13 @@ dialog{overscroll-behavior:contain}
 <div id="toast"></div>
 
 <script>
-const VER='2026-11-17.2';
+const VER='2026-11-20.1';
 // Crash breadcrumbs: written synchronously so they survive iOS killing the page mid-action.
 const crumb=(step,extra={})=>{try{localStorage.setItem('planner-debug',JSON.stringify({step,at:new Date().toLocaleTimeString(),ver:VER,...extra}))}catch{}};
 // ---------- state ----------
 const DEF={settings:{geminiKey:'',model:'',clientId:''},
   profile:{name:'',commuteMin:20,wake:'07:00',sleep:'23:00',routine:'',interests:'',goals:'',prefs:'',plan:'',planStart:''},
-  memory:[],plans:{},journal:{},quizzes:[],learned:[],podcasts:{}};
+  memory:[],plans:{},mine:{},journal:{},quizzes:[],learned:[],podcasts:{}};
 let S; try{S=JSON.parse(localStorage.getItem('planner'))||{}}catch{S={}}
 for(const k in DEF) S[k]=typeof DEF[k]==='object'&&!Array.isArray(DEF[k])?{...DEF[k],...S[k]}:(S[k]??DEF[k]);
 if(!S.settings.autoFixed){S.settings.model='';S.settings.autoFixed=1}
@@ -364,7 +365,8 @@ async function listModels(){
   const rank=n=>[/preview|exp/.test(n)?1:0,/lite/.test(n)?0:1,-ver(n),n.length];
   ok.sort((a,b)=>{const x=rank(a),y=rank(b);return x[0]-y[0]||x[1]-y[1]||x[2]-y[2]||x[3]-y[3]});
   if(!ok.length) throw new Error('No Flash model is available for this API key.');
-  return ok;
+  const cur3=ok.filter(n=>ver(n)>=3); // 2.x is retired for new keys but still listed
+  return cur3.length?cur3:ok;
 }
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 // Turn Google's 429 details into: is it the daily cap, and how long does it say to wait?
@@ -378,18 +380,19 @@ let lastGemini=null; // raw details of the last call, shown by Test connection
 async function gemini(prompt){
   if(!S.settings.geminiKey){showTab('you');throw new Error('Add your Gemini key under You → Connections first.')}
   modelList??=await listModels();
-  const pref=S.settings.model.trim(), order=[...new Set([pref,...modelList].filter(Boolean))].slice(0,3);
+  const pref=S.settings.model.trim(), order=[...new Set([pref,...modelList].filter(Boolean))];
   const body=JSON.stringify({contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}});
-  let last='';
-  // ponytail: at most 3 models, busy/slow ones are skipped not retried; each failed call costs free quota
+  let last='',tries=0,daily=false; const log=[];
+  // ponytail: at most 3 live models, busy/slow ones are skipped not retried; each failed call costs free quota
   for(const model of order){
+    if(tries>=3) break; tries++;
     for(let attempt=0;attempt<2;attempt++){
       crumb(`waiting for ${model} (try ${attempt+1})`);
       let r;
       try{r=await fetch(`${GAPI}models/${encodeURIComponent(model)}:generateContent`,
         {method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':S.settings.geminiKey},body,signal:AbortSignal.timeout(45000)})}
       catch(e){if(e.name!=='TimeoutError') throw new Error('Network problem reaching Gemini. Check your connection.');
-        last=`${model}: no reply in 45s`;lastGemini={model,status:'timeout',msg:'',quota:''};break} // slow = busy: next model
+        last=`${model}: no reply in 45s`;log.push(last);lastGemini={model,status:'timeout',msg:'',quota:''};break} // slow = busy: next model
       const d=await r.json().catch(()=>({}));
       const msg=d.error?.message||'', lim=r.status===429?limitInfo(d):null;
       lastGemini={model,status:r.status,msg,quota:lim?.ids||''};
@@ -400,13 +403,13 @@ async function gemini(prompt){
         if(!c?.content) throw new Error(`Gemini returned no answer (${c?.finishReason||d.promptFeedback?.blockReason||'empty'}). Try again.`);
         return parseJSON(c.content.parts.map(p=>p.text||'').join(''));
       }
-      last=`${model}: ${r.status} ${msg}`;
+      last=`${model}: ${r.status} ${msg}`; if(attempt===0||r.status!==429) log.push(`${model}: ${r.status}`);
       if(r.status===404||/no longer available|not found|deprecat|not supported/i.test(msg)){ // retired: forget it, try the next
         modelList=modelList.filter(m=>m!==model);
-        if(model===pref){S.settings.model='';$('s_model').value='';save()} break}
+        if(model===pref){S.settings.model='';$('s_model').value='';save()} tries--; break} // retired doesn't count as a try
       if(lim){
         if(!lim.daily&&lim.wait&&lim.wait<=30&&attempt===0){toast(`Free-tier speed limit, waiting ${Math.ceil(lim.wait)}s…`);await sleep(lim.wait*1000+500);continue}
-        if(lim.daily) break; // this model's daily allowance is gone; the other model has its own
+        if(lim.daily){daily=true;break} // this model's daily allowance is gone; the other model has its own
         throw new Error(`Gemini's free per-minute limit was hit. Wait a minute and try again. (${last})`)}
       if(r.status>=500) break; // busy: go straight to the next model, it has its own capacity
       if(r.status===400&&/api key/i.test(msg)) throw new Error('Google says this API key is not valid. Paste it again under You → Connections.');
@@ -414,8 +417,9 @@ async function gemini(prompt){
       throw new Error('Gemini: '+last);
     }
   }
-  if(/429/.test(last)) throw new Error(`Today's free Gemini allowance is used up. It resets at midnight Pacific time. (${last})`);
-  throw new Error(`Gemini is busy right now. Wait a minute and try again. (${last})`);
+  const tried=log.length?` (tried ${log.join(', ')})`:'';
+  if(daily) throw new Error(`Today's free Gemini allowance is used up. It resets at midnight Pacific time.${tried}`);
+  throw new Error(`Gemini is busy right now. Wait a minute and try again.${tried}`);
 }
 function parseJSON(t){
   const fence=t.match(/```(?:json)?\s*([\s\S]*?)```/); if(fence) t=fence[1];
@@ -493,7 +497,7 @@ function routineFor(date){
   }
   return out;
 }
-const fixedItems=()=>[...events,...routineFor(cur)].sort((a,b)=>toMin(a.start)-toMin(b.start));
+const fixedItems=()=>[...events,...routineFor(cur),...(S.mine[cur]||[]).map((m,k)=>({...m,src:'mine',_m:k}))].sort((a,b)=>toMin(a.start)-toMin(b.start));
 function gaps(items){
   const w=toMin(S.profile.wake),z=toMin(S.profile.sleep),out=[]; let t=w;
   for(const it of [...items].sort((a,b)=>toMin(a.start)-toMin(b.start))){
@@ -550,6 +554,7 @@ function renderChips(){
   $('gcalBtn').classList.toggle('live',!!token);
   $('gcalBtn').lastChild.textContent=token?'Calendar':'Connect';
   $('pushBtn').hidden=!(token&&S.plans[cur]?.blocks?.length);
+  $('clearBtn').hidden=!(S.plans[cur]?.blocks?.length||S.mine[cur]?.length);
   $('planBtn').querySelector('span').textContent=S.plans[cur]?.blocks?.length?'Re-plan':'Plan my day';
 }
 function renderDay(){
@@ -598,7 +603,8 @@ function openSheet(kind,idx){
   const opts=(slotOpts[idx]&&ai?slotOpts[idx]:[]).map((o,k)=>`<button class="opt" data-pick="${k}">${look(o)[0]} <b>${esc(o.title)}</b><small>${esc(o.resource?.title||o.detail||'')}</small></button>`).join('');
   $('sheet').innerHTML=`<div class="grab"></div><div class="sh-head" style="--c:${c}"><div class="pill" style="--c:${c};background:${c}">${emo}</div>
     <div><div class="meta">${it.start} – ${it.end} · ${dur(toMin(it.end)-toMin(it.start))}</div><h2 class="rounded">${esc(it.title)}</h2></div></div>
-    <div class="sh-body">${it.detail?`<p>${esc(it.detail)}</p>`:''}${!ai?`<p class="mute">${it.src==='gcal'?'From Google Calendar':'From your routine'}</p>`:''}
+    <div class="sh-body">${it.detail?`<p>${esc(it.detail)}</p>`:''}${!ai?`<p class="mute">${{gcal:'From Google Calendar',mine:'Added by you',routine:'From your routine'}[it.src]}</p>`:''}
+    ${it.src==='mine'?`<div class="btnrow"><button class="btn sm" data-s="delmine" data-m="${it._m}" style="color:var(--bad)">Delete event</button></div>`:''}
     ${r?`<a class="res" ${url?`href="${esc(url)}"`:`href="https://www.google.com/search?q=${encodeURIComponent(r.title+' '+(r.creator||''))}"`} target="_blank" rel="noopener"><b>${esc(r.title)} ↗</b><small>${esc(r.creator||'')}${r.minutes?` · ${r.minutes} min`:''}</small></a>`:''}
     ${ai?`<div class="btnrow"><button class="btn ${it.done?'':'pri'}" data-s="done">${it.done?'Mark not done':'✓ Done'}</button>
       <button class="btn" data-s="up" aria-label="More like this">👍</button><button class="btn" data-s="down" aria-label="Less like this">👎</button>
@@ -612,12 +618,35 @@ $('sheet').onclick=async e=>{
   const b=e.target.closest('[data-s],[data-pick]'); if(!b) return;
   const i=sheetIdx,a=b.dataset.s,blocks=S.plans[cur]?.blocks;
   if(a==='close') return closeSheet();
+  if(a==='delmine'){const m=S.mine[cur];dropEvent(m[b.dataset.m]);m.splice(b.dataset.m,1);save();closeSheet();return renderDay()}
+  if(a==='addev'){const t=$('ev_t').value.trim(),st=$('ev_s').value,en=$('ev_e').value;
+    if(!t||!st||!en||toMin(en)<=toMin(st)) return toast('Add a name, and an end time after the start.',1);
+    const ev={start:st,end:en,title:t};(S.mine[cur]??=[]).push(ev);save();closeSheet();renderDay();haptic();
+    if(token) gapi('calendars/primary/events',{method:'POST',body:JSON.stringify({summary:t,start:{dateTime:`${cur}T${st}:00`,timeZone:tz},end:{dateTime:`${cur}T${en}:00`,timeZone:tz},extendedProperties:{private:{planner:'mine'}}})})
+      .then(r=>{ev.gcalId=r.id;save()}).catch(e=>toast('Saved here, but not in Google Calendar: '+e.message,1));
+    return}
   if(b.dataset.pick!==undefined){remember(`Swapped "${blocks[i].title}" for "${slotOpts[i][b.dataset.pick].title}"`);
     dropEvent(blocks[i]);blocks[i]={...slotOpts[i][b.dataset.pick]};delete slotOpts[i];save();renderDay();return openSheet('i',i)}
   if(a==='alt') return busy(b,async()=>{await altSlot(i);openSheet('i',i)})();
   if(a==='del'){dropEvent(blocks[i]);blocks.splice(i,1);save();closeSheet();return renderDay()}
   feedback(i,a); openSheet('i',i);
 };
+
+function addEventSheet(){
+  const n=new Date(),h=cur===today()?Math.min(22,n.getHours()+1):9,p=x=>String(x).padStart(2,'0');
+  $('sheet').innerHTML=`<div class="grab"></div><div class="sh-body"><h2 class="rounded" style="margin:0 0 12px">New event</h2>
+    <div class="field"><label>What</label><input id="ev_t" placeholder="e.g. Dinner with Sam" enterkeyhint="done"></div>
+    <div class="btnrow"><div class="field" style="flex:1"><label>Start</label><input id="ev_s" type="time" value="${p(h)}:00"></div>
+    <div class="field" style="flex:1"><label>End</label><input id="ev_e" type="time" value="${p(h+1)}:00"></div></div>
+    <p class="mute">The planner works around it.${token?' It is also added to Google Calendar.':''}</p>
+    <div class="btnrow"><button class="btn pri" data-s="addev">Add</button><button class="btn" data-s="close">Cancel</button></div></div>`;
+  sheetIdx=null; $('sheet').showModal(); setTimeout(()=>$('ev_t').focus(),300);
+}
+function clearDay(){
+  const p=S.plans[cur]?.blocks||[],m=S.mine[cur]||[];
+  if(!confirm(`Clear ${cur===today()?'today':'this day'}? This removes the AI plan${m.length?' and the events you added here':''}. Google Calendar events and your routine stay.`)) return;
+  [...p,...m].forEach(dropEvent); delete S.plans[cur]; delete S.mine[cur]; slotOpts={}; save(); renderDay(); haptic();
+}
 
 // ---------- AI planning ----------
 const BLOCK_SCHEMA=`{"start":"HH:MM","end":"HH:MM","type":"learn|podcast|video|reading|practice|exercise|meal|break|rest|social|reflect|chores","title":"short, 2-5 words","detail":"one line: what and why","overlay":false,"resource":{"title":"exact real title","creator":"author/show/channel","url":"https://… or empty","minutes":0} or null}`;
@@ -833,6 +862,7 @@ $('week').onclick=e=>{const b=e.target.closest('[data-d]'); if(b) go(b.dataset.d
 $('date').onchange=e=>go(e.target.value||today());
 $('gcalBtn').onclick=connectGcal;
 $('pushBtn').onclick=busy($('pushBtn'),pushPlan);
+$('addBtn').onclick=addEventSheet; $('clearBtn').onclick=clearDay;
 $('planBtn').onclick=async()=>{
   $('thinking').innerHTML=`<div class="thinking"><span class="dots"><span></span><span></span><span></span></span>Looking at your day and finding things worth your time…</div>`;
   await busy($('planBtn'),planDay)(); $('thinking').innerHTML='';
